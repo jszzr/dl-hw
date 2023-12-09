@@ -130,22 +130,23 @@ def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test
     for split in image_paths:
         imgpaths = image_paths[split]
         imcaps = image_captions[split]
-      
-        enc_captions = []
+
+        enc_captions:list[list] = []
 
         for i, path in enumerate(imgpaths):
             captions = imcaps[i]
-          
-            for j, c in enumerate(captions):
+            # for j, c in enumerate(captions):
                 # 对文本描述进行编码
-                enc_c = [vocab['<start>']] + [vocab.get(word, vocab['<unk>']) for word in c] + [vocab['<end>']] 
-                enc_captions.append(enc_c)
+            enc_c: list[int] = [vocab['<start>']] + [vocab.get(word, vocab['<unk>']) for word in captions] + [vocab['<end>']] 
+            enc_captions.append(enc_c)
         # 合法性检查
         # assert len(imgpaths) == len(enc_captions)
       
         # 存储数据
         data = {'IMAGES': imgpaths, 
                 'CAPTIONS': enc_captions}
+        print("数据集大小：", len(imgpaths))
+        print("数据集：", len(enc_captions))
         with open(os.path.join(output_folder, split + '_data.json'), 'w') as fw:
             json.dump(data, fw)
   
@@ -172,7 +173,6 @@ with open('./data/flickr8k/test_captions.json', 'r') as f:
     test_data = json.load(f)
 
 print("词典长度：", len(vocab))
-print("词典：", vocab)
 print("训练集json：", len(train_data))
 print("测试集json：", len(test_data))
 print("训练集json+测试集json：", len(train_data)+len(test_data))
@@ -199,7 +199,7 @@ class ImageTextDataset(Dataset):
     PyTorch数据类，用于PyTorch DataLoader来按批次产生数据
     """
 
-    def __init__(self, dataset_path, vocab_path, split, captions_per_image=5, max_len=30, transform=None):
+    def __init__(self, dataset_path, vocab_path, split, captions_per_image=1, max_len=120, transform=None):
         """
         参数：
             dataset_path：json格式数据文件路径
@@ -243,6 +243,7 @@ class ImageTextDataset(Dataset):
         return self.dataset_size
 
 
+
 # ### 批量读取数据
 # 
 # 利用刚才构造的数据集类，借助DataLoader类构建能够按批次产生训练、验证和测试数据的对象。
@@ -250,7 +251,7 @@ class ImageTextDataset(Dataset):
 # In[10]:
 
 
-def mktrainval(data_dir, vocab_path, batch_size, workers=4):
+def mktrainval(data_dir, vocab_path, batch_size, workers=0):
     train_tx = transforms.Compose([
         transforms.Resize(256),
         transforms.RandomCrop(224),
@@ -268,12 +269,14 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=4):
                                  vocab_path, 'train',  transform=train_tx)
     test_set = ImageTextDataset(os.path.join(data_dir, 'test_data.json'), 
                                  vocab_path, 'test', transform=test_tx)
+    print("训练集大小：", len(train_set))
+    print("测试集大小：", len(test_set))
 
     train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+        train_set, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True, drop_last=True)
     
     test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, drop_last=False)
+        test_set, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, drop_last=True)
 
     return train_loader, test_loader    
 
@@ -304,7 +307,44 @@ class ImageEncoder(nn.Module):
         
     def forward(self, images):
         out = self.grid_rep_extractor(images) 
+        # print(out.shape)
         return out
+
+
+# import torchvision.models as models
+
+# class ImageEncoder(nn.Module):
+#     def __init__(self, finetuned=True):
+#         super(ImageEncoder, self).__init__()
+#         self.model = models.vit_b_16(pretrained=True)
+#         for param in self.model.parameters():
+#             param.requires_grad = finetuned
+
+#     def forward(self, images):
+#         out = self.model(images)
+#         return out
+
+
+# import torchvision.models as models
+
+# class ImageEncoder(nn.Module):
+#     def __init__(self, image_code_dim, grid_height=40, grid_width=25, finetuned=True):
+#         super(ImageEncoder, self).__init__()
+#         self.model = models.vit_b_16(pretrained=True)
+#         self.fc = nn.Linear(self.model.hidden_dim, image_code_dim)
+#         self.grid_height = grid_height
+#         self.grid_width = grid_width
+#         self.image_code_dim = image_code_dim
+#         for param in self.model.parameters():
+#             param.requires_grad = finetuned
+
+#     def forward(self, images):
+#         out = self.model(images)
+#         out = out.view(images.size(0), self.grid_height * self.grid_width, -1)
+#         out = self.fc(out)
+#         out = out.view(images.size(0), self.image_code_dim, self.grid_height, self.grid_width)
+#         return out
+
 
 
 # ### 文本解码器
@@ -667,70 +707,68 @@ def evaluate(data_loader, model, config):
 # 模型训练的具体方案为一共训练30轮，编码器和解码器的学习速率分别为0.0001和0.0005。
 # 
 # <!-- 模型训练的具体方案为一共训练30轮，初始编码器和解码器的学习速率分别为0.0001和0.0005，每10轮将学习速率变为原数值的1/10。 -->
-
 # In[19]:
 
+def main():
+    # 设置模型超参数和辅助变量
+    # freeze_support()
+    config = Namespace(
+        max_len = 30,
+        captions_per_image = 5,
+        batch_size = 32,
+        image_code_dim = 2048,
+        word_dim = 512,
+        hidden_size = 512,
+        attention_dim = 512,
+        num_layers = 1,
+        encoder_learning_rate = 0.0001,
+        decoder_learning_rate = 0.0005,
+        num_epochs = 10,
+        grad_clip = 5.0,
+        alpha_weight = 1.0,
+        evaluate_step = 900, # 每隔多少步在验证集上测试一次
+        checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
+        best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
+        last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
+        beam_k = 5
+    )
 
-# 设置模型超参数和辅助变量
-config = Namespace(
-    max_len = 30,
-    captions_per_image = 5,
-    batch_size = 32,
-    image_code_dim = 2048,
-    word_dim = 512,
-    hidden_size = 512,
-    attention_dim = 512,
-    num_layers = 1,
-    encoder_learning_rate = 0.0001,
-    decoder_learning_rate = 0.0005,
-    num_epochs = 10,
-    grad_clip = 5.0,
-    alpha_weight = 1.0,
-    evaluate_step = 900, # 每隔多少步在验证集上测试一次
-    checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
-    best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
-    last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
-    beam_k = 5
-)
+    # 设置GPU信息
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 
-# 设置GPU信息
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    # 数据
+    data_dir = './data/flickr8k/'
+    vocab_path = './data/flickr8k/vocab.json'
+    train_loader, test_loader = mktrainval(data_dir, vocab_path, config.batch_size)
 
-# 数据
-data_dir = './data/flickr8k/'
-vocab_path = './data/flickr8k/vocab.json'
-train_loader, test_loader = mktrainval(data_dir, vocab_path, config.batch_size)
+    # 模型
+    with open(vocab_path, 'r') as f:
+        vocab = json.load(f)
 
-# 模型
-with open(vocab_path, 'r') as f:
-    vocab = json.load(f)
+    # 随机初始化 或 载入已训练的模型
+    start_epoch = 0
+    checkpoint = config.checkpoint
+    if checkpoint is None:
+        model = ARCTIC(config.image_code_dim, vocab, config.word_dim, config.attention_dim, config.hidden_size, config.num_layers)
+    else:
+        checkpoint = torch.load(checkpoint)
+        start_epoch = checkpoint['epoch'] + 1
+        model = checkpoint['model']
 
-# 随机初始化 或 载入已训练的模型
-start_epoch = 0
-checkpoint = config.checkpoint
-if checkpoint is None:
-    model = ARCTIC(config.image_code_dim, vocab, config.word_dim, config.attention_dim, config.hidden_size, config.num_layers)
-else:
-    checkpoint = torch.load(checkpoint)
-    start_epoch = checkpoint['epoch'] + 1
-    model = checkpoint['model']
+    # 优化器
+    optimizer = get_optimizer(model, config)
 
-# 优化器
-optimizer = get_optimizer(model, config)
+    # 将模型拷贝至GPU，并开启训练模式
+    model.to(device)
+    model.train()
 
-# 将模型拷贝至GPU，并开启训练模式
-model.to(device)
-model.train()
+    # 损失函数
+    loss_fn = PackedCrossEntropyLoss().to(device)
 
-# 损失函数
-loss_fn = PackedCrossEntropyLoss().to(device)
-
-best_res = 0
-print("开始训练")
-fw = open('log.txt', 'w')
-if __name__ == '__main__':
-    freeze_support()
+    best_res = 0
+    print("开始训练")
+    fw = open('log.txt', 'w')
     for epoch in range(start_epoch, config.num_epochs):
         for i, (imgs, caps, caplens) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -789,6 +827,8 @@ if __name__ == '__main__':
         (checkpoint['epoch'], bleu_score))
     fw.close()      
 
+if __name__ == '__main__':
+    main()
 
 # 这段代码完成训练，最后一行会输出在验证集上表现最好的模型在测试集上的结果，具体如下：
 # 
