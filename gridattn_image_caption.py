@@ -321,7 +321,7 @@ class ImageEncoder(nn.Module):
         
     def forward(self, images):
         out = self.grid_rep_extractor(images) 
-        print(out.shape)
+        # print(out.shape)
         return out
 
 # import torchvision.models as models
