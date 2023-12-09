@@ -295,21 +295,34 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
 # In[11]:
 
 
-from torchvision.models import ResNet101_Weights
+# from torchvision.models import ResNet101_Weights
+# class ImageEncoder(nn.Module):
+#     def __init__(self, finetuned=True):
+#         super(ImageEncoder, self).__init__()
+#         model = torchvision.models.resnet101(weights=ResNet101_Weights.DEFAULT)
+#         # ResNet-101网格表示提取器
+#         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
+#         for param in self.grid_rep_extractor.parameters():
+#             param.requires_grad = finetuned
+        
+#     def forward(self, images):
+#         out = self.grid_rep_extractor(images) 
+#         # print(out.shape)
+#         return out
+
+from torchvision.models import vit_b_16
 class ImageEncoder(nn.Module):
     def __init__(self, finetuned=True):
         super(ImageEncoder, self).__init__()
-        model = torchvision.models.resnet101(weights=ResNet101_Weights.DEFAULT)
-        # ResNet-101网格表示提取器
+        model = torchvision.models.vit_b_16(pretrained=True)
         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
         for param in self.grid_rep_extractor.parameters():
             param.requires_grad = finetuned
         
     def forward(self, images):
         out = self.grid_rep_extractor(images) 
-        # print(out.shape)
+        print(out.shape)
         return out
-
 
 # import torchvision.models as models
 
@@ -322,6 +335,7 @@ class ImageEncoder(nn.Module):
 
 #     def forward(self, images):
 #         out = self.model(images)
+#         print(out.shape)
 #         return out
 
 
@@ -345,6 +359,30 @@ class ImageEncoder(nn.Module):
 #         out = out.view(images.size(0), self.image_code_dim, self.grid_height, self.grid_width)
 #         return out
 
+# import torchvision.models as models
+
+# class ImageEncoder(nn.Module):
+#     def __init__(self, image_code_dim):
+#         super(ImageEncoder, self).__init__()
+#         self.vit_model = models.vit_b_16(pretrained=True)
+#         # 移除预训练模型的头部，因为我们将自定义头部
+#         self.vit_model.head = nn.Identity()
+#         # 添加自定义头部，使用转置卷积层进行形状调整
+#         self.custom_head = nn.Sequential(
+#             nn.ConvTranspose2d(self.vit_model.hidden_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
+#             nn.ReLU(inplace=True),
+#             nn.ConvTranspose2d(image_code_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
+#             nn.ReLU(inplace=True),
+#             nn.ConvTranspose2d(image_code_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
+#             nn.ReLU(inplace=True),
+#         )
+
+#     def forward(self, x):
+#         # ViT的前向传播
+#         x = self.vit_model(x)
+#         # 使用自定义头部
+#         x = self.custom_head(x.unsqueeze(-1).unsqueeze(-1))  # 在维度3和4上增加两个维度
+#         return x
 
 
 # ### 文本解码器
@@ -716,7 +754,7 @@ def main():
         max_len = 30,
         captions_per_image = 5,
         batch_size = 32,
-        image_code_dim = 2048,
+        image_code_dim = 768, # 2048
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
