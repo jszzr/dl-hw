@@ -40,7 +40,7 @@
 # - 对于图像，我们这里仅记录文件路径。
 # - - 如果机器的内存和硬盘空间就比较大，这里也可以将图片读取并处理成三维数组，这样在模型训练和测试的阶段，就不需要再直接读取图片。
 
-# In[5]:
+
 
 
 # get_ipython().run_line_magic('matplotlib', 'inline')
@@ -65,7 +65,7 @@ import torchvision.transforms as transforms
 import nltk
 from torch.multiprocessing import freeze_support
 
-# In[6]:
+
 
 
 train_dataset_path = "./data/flickr8k/train_captions.json"
@@ -75,7 +75,7 @@ image_path = "./data/flickr8k/images/"
 output_path = "./data/flickr8k/"
 
 
-# In[7]:
+
 
 
 def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test_json_file = "./data/flickr8k/test_captions.json" , vocab_file = "./data/flickr8k/vocab.json", output_folder = "./data/flickr8k/"):
@@ -158,7 +158,7 @@ create_dataset()
 
 # 在调用该函数生成需要的格式的数据集文件之后，我们可以展示其中一条数据，简单验证下数据的格式是否和我们预想的一致。
 
-# In[8]:
+
 
 
 # 读取词典和验证集
@@ -191,7 +191,7 @@ print("images数量：", len(os.listdir('./data/flickr8k/images')))
 # 
 # 在PyTorch中定义数据集类非常简单，仅需要继承torch.utils.data.Dataset类，并实现\_\_getitem\_\_和\_\_len\_\_两个函数即可。
 
-# In[9]:
+
 
 
 class ImageTextDataset(Dataset):
@@ -248,7 +248,7 @@ class ImageTextDataset(Dataset):
 # 
 # 利用刚才构造的数据集类，借助DataLoader类构建能够按批次产生训练、验证和测试数据的对象。
 
-# In[10]:
+
 
 
 def mktrainval(data_dir, vocab_path, batch_size, workers=0):
@@ -292,97 +292,22 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
 # 
 # ARCTIC原始模型使用在ImageNet数据集上预训练过的分类模型VGG19作为图像编码器，VGG19最后一个卷积层作为网格表示提取层。而我们这里使用ResNet-101作为图像编码器，并将其最后一个非全连接层作为网格表示提取层。
 
-# In[11]:
 
-
-# from torchvision.models import ResNet101_Weights
-# class ImageEncoder(nn.Module):
-#     def __init__(self, finetuned=True):
-#         super(ImageEncoder, self).__init__()
-#         model = torchvision.models.resnet101(weights=ResNet101_Weights.DEFAULT)
-#         # ResNet-101网格表示提取器
-#         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
-#         for param in self.grid_rep_extractor.parameters():
-#             param.requires_grad = finetuned
-        
-#     def forward(self, images):
-#         out = self.grid_rep_extractor(images) 
-#         # print(out.shape)
-#         return out
 
 from torchvision.models import vit_b_16
 class ImageEncoder(nn.Module):
     def __init__(self, finetuned=True):
         super(ImageEncoder, self).__init__()
-        model = torchvision.models.vit_b_16(pretrained=True)
-        self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
+        model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
+        self.grid_rep_extractor = model
+        print("层数：", len(list(model.children())))
         for param in self.grid_rep_extractor.parameters():
             param.requires_grad = finetuned
         
     def forward(self, images):
-        out = self.grid_rep_extractor(images) 
-        # print(out.shape)
+        out = self.grid_rep_extractor(images)
+        print(out.shape)
         return out
-
-# import torchvision.models as models
-
-# class ImageEncoder(nn.Module):
-#     def __init__(self, finetuned=True):
-#         super(ImageEncoder, self).__init__()
-#         self.model = models.vit_b_16(pretrained=True)
-#         for param in self.model.parameters():
-#             param.requires_grad = finetuned
-
-#     def forward(self, images):
-#         out = self.model(images)
-#         print(out.shape)
-#         return out
-
-
-# import torchvision.models as models
-
-# class ImageEncoder(nn.Module):
-#     def __init__(self, image_code_dim, grid_height=40, grid_width=25, finetuned=True):
-#         super(ImageEncoder, self).__init__()
-#         self.model = models.vit_b_16(pretrained=True)
-#         self.fc = nn.Linear(self.model.hidden_dim, image_code_dim)
-#         self.grid_height = grid_height
-#         self.grid_width = grid_width
-#         self.image_code_dim = image_code_dim
-#         for param in self.model.parameters():
-#             param.requires_grad = finetuned
-
-#     def forward(self, images):
-#         out = self.model(images)
-#         out = out.view(images.size(0), self.grid_height * self.grid_width, -1)
-#         out = self.fc(out)
-#         out = out.view(images.size(0), self.image_code_dim, self.grid_height, self.grid_width)
-#         return out
-
-# import torchvision.models as models
-
-# class ImageEncoder(nn.Module):
-#     def __init__(self, image_code_dim):
-#         super(ImageEncoder, self).__init__()
-#         self.vit_model = models.vit_b_16(pretrained=True)
-#         # 移除预训练模型的头部，因为我们将自定义头部
-#         self.vit_model.head = nn.Identity()
-#         # 添加自定义头部，使用转置卷积层进行形状调整
-#         self.custom_head = nn.Sequential(
-#             nn.ConvTranspose2d(self.vit_model.hidden_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
-#             nn.ReLU(inplace=True),
-#             nn.ConvTranspose2d(image_code_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
-#             nn.ReLU(inplace=True),
-#             nn.ConvTranspose2d(image_code_dim, image_code_dim, kernel_size=3, stride=2, padding=1, output_padding=1),
-#             nn.ReLU(inplace=True),
-#         )
-
-#     def forward(self, x):
-#         # ViT的前向传播
-#         x = self.vit_model(x)
-#         # 使用自定义头部
-#         x = self.custom_head(x.unsqueeze(-1).unsqueeze(-1))  # 在维度3和4上增加两个维度
-#         return x
 
 
 # ### 文本解码器
@@ -397,7 +322,7 @@ class ImageEncoder(nn.Module):
 # - 再通过softmax函数获取单个查询和所有键的关联程度，即归一化的相关性分数；
 # - 最后以相关性得分为权重，对值进行加权求和，计算输出特征。这里的值和键是同一组向量表示。
 
-# In[12]:
+
 
 
 class AdditiveAttention(nn.Module):
@@ -458,7 +383,7 @@ class AdditiveAttention(nn.Module):
 # 
 # - （3.4）使用全连接层和softmax激活函数将GRU的输出映射为词表上的概率分布。
 
-# In[13]:
+
 
 
 class AttentionDecoder(nn.Module):
@@ -551,101 +476,226 @@ class AttentionDecoder(nn.Module):
         return predictions, alphas, captions, lengths, sorted_cap_indices
 
 
+# class PositionalEncoding(nn.Module):
+#     """位置编码"""
+#     #num+hiddens:向量长度  max_len:序列最大长度
+#     def __init__(self, num_hiddens, dropout, max_len=1000):
+#         super(PositionalEncoding, self).__init__()
+#         self.dropout = nn.Dropout(dropout)
+#         self.P = torch.zeros((1, max_len, num_hiddens))
+#         X = torch.arange(max_len, dtype=torch.float32).reshape(
+#             -1, 1) / torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+
+#         self.P[:, :, 0::2] = torch.sin(X)
+#         self.P[:, :, 1::2] = torch.cos(X)
+
+#     def forward(self, X):
+#         X = X + self.P[:, :X.shape[1], :].to(X.device)
+#         return self.dropout(X)
+    
+import math
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout, max_len=5000):
+        """
+        位置编码器类的初始化函数
+        
+        共有三个参数，分别是
+        d_model：词嵌入维度
+        dropout: dropout触发比率
+        max_len：每个句子的最大长度
+        """
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # Compute the positional encodings
+        pe = torch.zeros(max_len, d_model) # 构建位置编码的张量
+        position = torch.arange(0, max_len).unsqueeze(1) # 将每个token的位置（即从0到max_len-1）变为列向量
+        div_term = torch.exp(torch.arange(0, d_model, 2) *
+                             -(math.log(10000.0) / d_model)) # 计算
+        pe[:, 0::2] = torch.sin(position * div_term) # 使用了广播机制分配pe的不同列。这代表着从第0行开始每隔两列取一列。返回所有偶数位置的编码。
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0) # 最后增加了一个维度，也就是batch的维度。
+        self.register_buffer('pe', pe) #将位置编码张量存储在模型中。这是因为位置编码不需要进行训练，因此可以将其视为模型的一个固定部分。
+        
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1)].detach() # 从位置编码张量中取出对应长度的位置编码，并与输入的词嵌入相加。
+        return self.dropout(x)
+
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, vocab_size, word_dim, hidden_size, num_layers, dropout=0.2) -> None:
+        super(TransformerDecoder, self).__init__()
+        self.embed = nn.Embedding(vocab_size, word_dim)
+        self.PE = PositionalEncoding(word_dim, dropout)
+        decoder_layers = nn.TransformerDecoderLayer(
+            d_model=word_dim, # 输入维度
+            nhead=8,  # Number of heads in the multiheadattention models
+            dim_feedforward=768,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layers, num_layers)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+    
+    def positional_encoding(self, max_len, embed_dim):
+        # 生成位置编码
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, embed_dim, 2) * (-torch.log(torch.tensor(10000.0)) / embed_dim))
+        positional_encoding = torch.zeros(max_len, embed_dim)
+        positional_encoding[:, 0::2] = torch.sin(position * div_term)
+        positional_encoding[:, 1::2] = torch.cos(position * div_term)
+        return positional_encoding
+
+    def forward(self, image_code, captions, cap_lens):
+        embed_captions = self.embed(captions)
+        positional_encoding = self.PE(embed_captions)
+        
+        out = self.transformer_decoder(positional_encoding, image_code)
+        out = self.fc(out)
+        return out, None, captions, cap_lens, None
+
 # ### ARCTIC模型
 # 
 # 在定义编码器和解码器完成之后，我们就很容易构建图像描述模型ARCTIC了。仅需要在初始化函数时声明编码器和解码器，然后在前馈函数实现里，将编码器的输出和文本描述作为解码器的输入即可。
 # 
 # 这里我们额外定义了束搜索采样函数，用于生成句子，以计算BLEU值。下面的代码详细标注了其具体实现。
 
-# In[14]:
-
+from torch.nn import functional as F
 
 class ARCTIC(nn.Module):
     def __init__(self, image_code_dim, vocab, word_dim, attention_dim, hidden_size, num_layers):
         super(ARCTIC, self).__init__()
         self.vocab = vocab
         self.encoder = ImageEncoder()
-        self.decoder = AttentionDecoder(image_code_dim, len(vocab), word_dim, attention_dim, hidden_size, num_layers)
+        self.decoder = TransformerDecoder(len(vocab), word_dim, hidden_size, num_layers)
 
     def forward(self, images, captions, cap_lens):
         image_code = self.encoder(images)
         return self.decoder(image_code, captions, cap_lens)
     
     def generate_by_beamsearch(self, images, beam_k, max_len):
-        vocab_size = len(self.vocab)
-        image_codes = self.encoder(images)
-        texts = []
-        device = images.device
-        # 对每个图像样本执行束搜索
-        for image_code in image_codes:
-            # 将图像表示复制k份
-            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
-            # 生成k个候选句子，初始时，仅包含开始符号<start>
-            cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
-            cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
-            sent_lens = torch.LongTensor([1]*beam_k).to(device)
-            # 获得GRU的初始隐状态
-            image_code, cur_sent_embed, _, _, hidden_state = \
-                self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
-            # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
-            end_sents = []
-            # 存储已生成完整的句子的概率
-            end_probs = []
-            # 存储未完整生成的句子的概率
-            probs = torch.zeros(beam_k, 1).to(device)
-            k = beam_k
-            while True:
-                preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
-                # -> (k, vocab_size)
-                preds = nn.functional.log_softmax(preds, dim=1)
-                # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
-                # -> (k, vocab_size)
-                probs = probs.repeat(1,preds.size(1)) + preds
-                if cur_sents.size(1) == 1:
-                    # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
-                    values, indices = probs[0].topk(k, 0, True, True)
+        # 编码图像
+        image_code = self.encoder(images)
+
+        # 初始化束搜索
+        initial_word = [self.vocab['<start>']] * beam_k
+        sequences = [[list(), 1.0] for _ in range(beam_k)]
+
+        # 循环生成序列
+        for _ in range(max_len):
+            all_candidates = list()
+            for i in range(beam_k):
+                seq, score = sequences[i]
+                if seq[-1] == self.vocab['<end>']:
+                    # 如果序列已经结束，直接将其添加到候选序列中
+                    all_candidates.append([seq, score])
                 else:
-                    # probs: (k, vocab_size) 是二维张量
-                    # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
-                    # 因此，将probs转换为一维张量，再使用topk函数获取最大的k个值
-                    values, indices = probs.view(-1).topk(k, 0, True, True)
-                # 计算最大的k个值对应的句子索引和词索引
-                sent_indices = torch.div(indices, vocab_size, rounding_mode='trunc') 
-                word_indices = indices % vocab_size 
-                # 将词拼接在前一轮的句子后，获得此轮的句子
-                cur_sents = torch.cat([cur_sents[sent_indices], word_indices.unsqueeze(1)], dim=1)
-                # 查找此轮生成句子结束符<end>的句子
-                end_indices = [idx for idx, word in enumerate(word_indices) if word == self.vocab['<end>']]
-                if len(end_indices) > 0:
-                    end_probs.extend(values[end_indices])
-                    end_sents.extend(cur_sents[end_indices].tolist())
-                    # 如果所有的句子都包含结束符，则停止生成
-                    k -= len(end_indices)
-                    if k == 0:
-                        break
-                # 查找还需要继续生成词的句子
-                cur_indices = [idx for idx, word in enumerate(word_indices) 
-                               if word != self.vocab['<end>']]
-                if len(cur_indices) > 0:
-                    cur_sent_indices = sent_indices[cur_indices]
-                    cur_word_indices = word_indices[cur_indices]
-                    # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
-                    cur_sents = cur_sents[cur_indices]
-                    probs = values[cur_indices].view(-1,1)
-                    hidden_state = hidden_state[:,cur_sent_indices,:]
-                    cur_sent_embed = self.decoder.embed(
-                        cur_word_indices.view(-1,1))[:,0,:]
-                # 句子太长，停止生成
-                if cur_sents.size(1) >= max_len:
-                    break
-            if len(end_sents) == 0:
-                # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
-                gen_sent = cur_sents[0].tolist()
-            else: 
-                # 否则选取包含结束符的句子中概率最大的句子
-                gen_sent = end_sents[end_probs.index(max(end_probs))]
-            texts.append(gen_sent)
-        return texts
+                    # 否则，生成下一个词
+                    input_seq = torch.LongTensor([seq]).to(images.device)
+                    output = self.decoder(image_code, input_seq)
+                    output = F.log_softmax(output, dim=-1)
+                    topk_scores, topk_words = output.topk(beam_k, dim=-1)
+
+                    # 将生成的词添加到候选序列中
+                    for k in range(beam_k):
+                        word, new_score = topk_words[0][k], topk_scores[0][k]
+                        all_candidates.append([seq + [word.item()], score * new_score.item()])
+
+            # 选择得分最高的k个序列
+            ordered = sorted(all_candidates, key=lambda tup:tup[1], reverse=True)
+            sequences = ordered[:beam_k]
+
+        return sequences
+
+
+
+# class ARCTIC(nn.Module):
+#     def __init__(self, image_code_dim, vocab, word_dim, attention_dim, hidden_size, num_layers):
+#         super(ARCTIC, self).__init__()
+#         self.vocab = vocab
+#         self.encoder = ImageEncoder()
+#         self.decoder = AttentionDecoder(image_code_dim, len(vocab), word_dim, attention_dim, hidden_size, num_layers)
+
+#     def forward(self, images, captions, cap_lens):
+#         image_code = self.encoder(images)
+#         return self.decoder(image_code, captions, cap_lens)
+    
+    # def generate_by_beamsearch(self, images, beam_k, max_len):
+    #     vocab_size = len(self.vocab)
+    #     image_codes = self.encoder(images)
+    #     texts = []
+    #     device = images.device
+    #     # 对每个图像样本执行束搜索
+    #     for image_code in image_codes:
+    #         # 将图像表示复制k份
+    #         image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
+    #         # 生成k个候选句子，初始时，仅包含开始符号<start>
+    #         cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
+    #         cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
+    #         sent_lens = torch.LongTensor([1]*beam_k).to(device)
+    #         # 获得GRU的初始隐状态
+    #         image_code, cur_sent_embed, _, _, hidden_state = \
+    #             self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
+    #         # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
+    #         end_sents = []
+    #         # 存储已生成完整的句子的概率
+    #         end_probs = []
+    #         # 存储未完整生成的句子的概率
+    #         probs = torch.zeros(beam_k, 1).to(device)
+    #         k = beam_k
+    #         while True:
+    #             preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
+    #             # -> (k, vocab_size)
+    #             preds = nn.functional.log_softmax(preds, dim=1)
+    #             # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
+    #             # -> (k, vocab_size)
+    #             probs = probs.repeat(1,preds.size(1)) + preds
+    #             if cur_sents.size(1) == 1:
+    #                 # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
+    #                 values, indices = probs[0].topk(k, 0, True, True)
+    #             else:
+    #                 # probs: (k, vocab_size) 是二维张量
+    #                 # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
+    #                 # 因此，将probs转换为一维张量，再使用topk函数获取最大的k个值
+    #                 values, indices = probs.view(-1).topk(k, 0, True, True)
+    #             # 计算最大的k个值对应的句子索引和词索引
+    #             sent_indices = torch.div(indices, vocab_size, rounding_mode='trunc') 
+    #             word_indices = indices % vocab_size 
+    #             # 将词拼接在前一轮的句子后，获得此轮的句子
+    #             cur_sents = torch.cat([cur_sents[sent_indices], word_indices.unsqueeze(1)], dim=1)
+    #             # 查找此轮生成句子结束符<end>的句子
+    #             end_indices = [idx for idx, word in enumerate(word_indices) if word == self.vocab['<end>']]
+    #             if len(end_indices) > 0:
+    #                 end_probs.extend(values[end_indices])
+    #                 end_sents.extend(cur_sents[end_indices].tolist())
+    #                 # 如果所有的句子都包含结束符，则停止生成
+    #                 k -= len(end_indices)
+    #                 if k == 0:
+    #                     break
+    #             # 查找还需要继续生成词的句子
+    #             cur_indices = [idx for idx, word in enumerate(word_indices) 
+    #                            if word != self.vocab['<end>']]
+    #             if len(cur_indices) > 0:
+    #                 cur_sent_indices = sent_indices[cur_indices]
+    #                 cur_word_indices = word_indices[cur_indices]
+    #                 # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
+    #                 cur_sents = cur_sents[cur_indices]
+    #                 probs = values[cur_indices].view(-1,1)
+    #                 hidden_state = hidden_state[:,cur_sent_indices,:]
+    #                 cur_sent_embed = self.decoder.embed(
+    #                     cur_word_indices.view(-1,1))[:,0,:]
+    #             # 句子太长，停止生成
+    #             if cur_sents.size(1) >= max_len:
+    #                 break
+    #         if len(end_sents) == 0:
+    #             # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
+    #             gen_sent = cur_sents[0].tolist()
+    #         else: 
+    #             # 否则选取包含结束符的句子中概率最大的句子
+    #             gen_sent = end_sents[end_probs.index(max(end_probs))]
+    #         texts.append(gen_sent)
+    #     return texts
 
 
 # ## 定义损失函数
@@ -753,7 +803,7 @@ def main():
     config = Namespace(
         max_len = 30,
         captions_per_image = 5,
-        batch_size = 32,
+        batch_size = 1,
         image_code_dim = 768, # 2048
         word_dim = 512,
         hidden_size = 512,
@@ -773,7 +823,8 @@ def main():
 
     # 设置GPU信息
     # os.environ['CUDA_VISIBLE_DEVICES'] = '2'
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    device = torch.device("cpu")
 
     # 数据
     data_dir = './data/flickr8k/'
