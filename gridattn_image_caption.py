@@ -530,8 +530,7 @@ class TransformerDecoder(nn.Module):
         
         out = self.transformer_decoder(positional_encoding, image_code)
         out = self.fc2(out)
-        return out, captions, cap_lens
-
+        return out, captions
 # ### ARCTIC模型
 # 
 # 在定义编码器和解码器完成之后，我们就很容易构建图像描述模型ARCTIC了。仅需要在初始化函数时声明编码器和解码器，然后在前馈函数实现里，将编码器的输出和文本描述作为解码器的输入即可。
@@ -679,7 +678,7 @@ class ARCTIC(nn.Module):
 # 
 # 这里采用了最常用的交叉熵损失作为损失函数。由于同一个训练批次里的文本描述的长度不一致，因此，有大量的不需要计算损失的<pad>目标。为了避免计算资源的浪费，这里先将数据按照文本长度排序，再利用pack_padded_sequence函数将预测目标为\<pad\>的数据去除，最后再利用交叉熵损失计算实际的损失。
 
-# In[15]:
+
 
 
 class PackedCrossEntropyLoss(nn.Module):
@@ -694,8 +693,9 @@ class PackedCrossEntropyLoss(nn.Module):
             targets：按文本长度排序过的文本描述
             lengths：文本长度
         """
-        predictions = pack_padded_sequence(predictions, lengths, batch_first=True)[0]
-        targets = pack_padded_sequence(targets, lengths, batch_first=True)[0]
+        lengths = lengths.to(torch.device('cpu'))
+        predictions = pack_padded_sequence(predictions, lengths, batch_first=True, enforce_sorted=False)[0]
+        targets = pack_padded_sequence(targets, lengths, batch_first=True, enforce_sorted=False)[0]
         return self.loss_fn(predictions, targets)
         
 
@@ -704,7 +704,7 @@ class PackedCrossEntropyLoss(nn.Module):
 # 
 # 这里选用Adam优化算法来更新模型参数，由于数据集较小，训练轮次少，因此，学习速率在训练过程中并不调整。但是对编码器和解码器采用了不同的学习速率。具体来说，预训练的图像编码器的学习速率小于需要从头开始训练的文本解码器的学习速率。
 
-# In[16]:
+
 
 
 def get_optimizer(model, config):
@@ -727,7 +727,7 @@ def adjust_learning_rate(optimizer, epoch, config):
 # 这里借助nltk库实现了图像描述中最常用的评估指标BLEU值，需要注意的是，再调用计算BLEU值之前，要先将文本中人工添加的文本开始符、结束符和占位符去掉。
 # 
 
-# In[17]:
+
 
 
 from nltk.translate.bleu_score import corpus_bleu
@@ -772,7 +772,7 @@ def evaluate(data_loader, model, config):
 # 模型训练的具体方案为一共训练30轮，编码器和解码器的学习速率分别为0.0001和0.0005。
 # 
 # <!-- 模型训练的具体方案为一共训练30轮，初始编码器和解码器的学习速率分别为0.0001和0.0005，每10轮将学习速率变为原数值的1/10。 -->
-# In[19]:
+
 
 def main():
     # 设置模型超参数和辅助变量
@@ -780,12 +780,12 @@ def main():
     config = Namespace(
         max_len = 30,
         captions_per_image = 5,
-        batch_size = 1,
-        image_code_dim = 768, # 2048
+        batch_size = 8,
+        image_code_dim = 2048
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
-        num_layers = 1,
+        num_layers = 3,
         encoder_learning_rate = 0.0001,
         decoder_learning_rate = 0.0005,
         num_epochs = 10,
@@ -799,8 +799,8 @@ def main():
     )
 
     # 设置GPU信息
-    # os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    # print("使用设备：", device)
     # device = torch.device("cpu")
 
     # 数据
@@ -844,10 +844,11 @@ def main():
             caplens = caplens.to(device)
 
             # 2. 前馈计算
-            predictions, captions, lengths = model(imgs, caps, caplens)
+            predictions, captions = model(imgs, caps, caplens)
+            
             # 3. 计算损失
             # captions从第2个词开始为targets
-            loss = loss_fn(predictions, captions[:, 1:], lengths)
+            loss = loss_fn(predictions, captions[:, 1:], caplens)
             # 重随机注意力正则项，使得模型尽可能全面的利用到每个网格
             # 要求所有时刻在同一个网格上的注意力分数的平方和接近1
             # loss += config.alpha_weight * ((1. - alphas.sum(axis=1)) ** 2).mean()
