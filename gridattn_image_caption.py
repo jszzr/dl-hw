@@ -412,7 +412,7 @@ class AttentionDecoder(nn.Module):
         # 将图像网格表示转换为序列表示形式 
         batch_size, image_code_dim = image_code.size(0), image_code.size(1)
         # -> (batch_size, grid_height, grid_width, image_code_dim) 
-        image_code = image_code.permute(0, 2, 3, 1)  
+        image_code = image_code.permute(0, 2, 3, 1)
         # -> (batch_size, grid_height * grid_width, image_code_dim)
         image_code = image_code.view(batch_size, -1, image_code_dim)
         # （1）按照caption的长短排序
@@ -475,24 +475,6 @@ class AttentionDecoder(nn.Module):
             alphas[:real_batch_size, step, :] = alpha
         return predictions, alphas, captions, lengths, sorted_cap_indices
 
-
-# class PositionalEncoding(nn.Module):
-#     """位置编码"""
-#     #num+hiddens:向量长度  max_len:序列最大长度
-#     def __init__(self, num_hiddens, dropout, max_len=1000):
-#         super(PositionalEncoding, self).__init__()
-#         self.dropout = nn.Dropout(dropout)
-#         self.P = torch.zeros((1, max_len, num_hiddens))
-#         X = torch.arange(max_len, dtype=torch.float32).reshape(
-#             -1, 1) / torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
-
-#         self.P[:, :, 0::2] = torch.sin(X)
-#         self.P[:, :, 1::2] = torch.cos(X)
-
-#     def forward(self, X):
-#         X = X + self.P[:, :X.shape[1], :].to(X.device)
-#         return self.dropout(X)
-    
 import math
 
 class PositionalEncoding(nn.Module):
@@ -528,31 +510,26 @@ class TransformerDecoder(nn.Module):
         super(TransformerDecoder, self).__init__()
         self.embed = nn.Embedding(vocab_size, word_dim)
         self.PE = PositionalEncoding(word_dim, dropout)
+        self.fc1 = nn.Linear(1000,512)
         decoder_layers = nn.TransformerDecoderLayer(
             d_model=word_dim, # 输入维度
             nhead=8,  # Number of heads in the multiheadattention models
-            dim_feedforward=768,
+            # dim_feedforward=768,
             dropout=dropout,
             batch_first=True,
         )
         self.transformer_decoder = nn.TransformerDecoder(decoder_layers, num_layers)
-        self.fc = nn.Linear(hidden_size, vocab_size)
-    
-    def positional_encoding(self, max_len, embed_dim):
-        # 生成位置编码
-        position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, embed_dim, 2) * (-torch.log(torch.tensor(10000.0)) / embed_dim))
-        positional_encoding = torch.zeros(max_len, embed_dim)
-        positional_encoding[:, 0::2] = torch.sin(position * div_term)
-        positional_encoding[:, 1::2] = torch.cos(position * div_term)
-        return positional_encoding
+        self.fc2 = nn.Linear(hidden_size, vocab_size)
 
     def forward(self, image_code, captions, cap_lens):
         embed_captions = self.embed(captions)
         positional_encoding = self.PE(embed_captions)
+        image_code = self.fc1(image_code)
+        image_code = image_code.unsqueeze(1)
+        image_code = image_code.expand(-1, 122, -1)
         
         out = self.transformer_decoder(positional_encoding, image_code)
-        out = self.fc(out)
+        out = self.fc2(out)
         return out, None, captions, cap_lens, None
 
 # ### ARCTIC模型
