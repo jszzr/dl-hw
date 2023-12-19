@@ -149,11 +149,11 @@ def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test
         print("数据集：", len(enc_captions))
         with open(os.path.join(output_folder, split + '_data.json'), 'w') as fw:
             json.dump(data, fw)
-  
 
 
 
-create_dataset()
+
+# create_dataset()
 
 
 # 在调用该函数生成需要的格式的数据集文件之后，我们可以展示其中一条数据，简单验证下数据的格式是否和我们预想的一致。
@@ -288,6 +288,24 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
 # ![ARCTIC的模型结构示意图](img/mt-cnn-attn.png)
 # 
 
+def get_attn_pad_mask(seq_q, seq_k):
+    batch_size, len_q = seq_q.size()
+    batch_size, len_k = seq_k.size()
+    # eq(zero) is PAD token
+    pad_attn_mask = seq_k.data.eq(0).unsqueeze(1)  # batch_size x 1 x len_k, one is masking
+    return pad_attn_mask.expand(batch_size, len_q, len_k)  # batch_size x len_q x len_k
+
+
+def get_attn_subsequent_mask(seq):
+    """
+    seq: [batch_size, tgt_len]
+    """
+    attn_shape = [seq.size(0), seq.size(1), seq.size(1)]
+    # attn_shape: [batch_size, tgt_len, tgt_len]
+    subsequence_mask = np.triu(np.ones(attn_shape), k=1)  # 生成一个上三角矩阵
+    subsequence_mask = torch.from_numpy(subsequence_mask).byte()
+    return subsequence_mask  # [batch_size, tgt_len, tgt_len]
+
 # ### 图像编码器
 # 
 # ARCTIC原始模型使用在ImageNet数据集上预训练过的分类模型VGG19作为图像编码器，VGG19最后一个卷积层作为网格表示提取层。而我们这里使用ResNet-101作为图像编码器，并将其最后一个非全连接层作为网格表示提取层。
@@ -300,13 +318,14 @@ class ImageEncoder(nn.Module):
         super(ImageEncoder, self).__init__()
         model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
         self.grid_rep_extractor = model
-        # print("层数：", len(list(model.children())))
+        self.fc = nn.Linear(1000, 512)
         for param in self.grid_rep_extractor.parameters():
             param.requires_grad = finetuned
         
     def forward(self, images):
         out = self.grid_rep_extractor(images)
-        # print(out.shape)
+        out = self.fc(out)
+        out = out.reshape(out.shape[0], -1, out.shape[1])
         return out
 
 
@@ -324,156 +343,6 @@ class ImageEncoder(nn.Module):
 
 
 
-
-# class AdditiveAttention(nn.Module):
-#     def  __init__(self, query_dim, key_dim, attn_dim):
-#         """
-#         参数：
-#             query_dim: 查询Q的维度
-#             key_dim: 键K的维度
-#             attn_dim: 注意力函数隐藏层表示的维度
-#         """
-#         super(AdditiveAttention, self).__init__()
-#         self.attn_w_1_q = nn.Linear(query_dim, attn_dim)
-#         self.attn_w_1_k = nn.Linear(key_dim, attn_dim)
-#         self.attn_w_2 = nn.Linear(attn_dim, 1)
-#         self.tanh = nn.Tanh()
-#         self.softmax = nn.Softmax(dim=1)
-
-#     def forward(self, query, key_value):
-#         """
-#         Q K V：Q和K算出相关性得分，作为V的权重，K=V
-#         参数：
-#             query: 查询 (batch_size, q_dim)
-#             key_value: 键和值，(batch_size, n_kv, kv_dim)
-#         """
-#         # （2）计算query和key的相关性，实现注意力评分函数
-#         # -> (batch_size, 1, attn_dim)
-#         queries = self.attn_w_1_q(query).unsqueeze(1)
-#         # -> (batch_size, n_kv, attn_dim)
-#         keys = self.attn_w_1_k(key_value)
-#         # -> (batch_size, n_kv)
-#         attn = self.attn_w_2(self.tanh(queries+keys)).squeeze(2) 
-#         # （3）归一化相关性分数
-#         # -> (batch_size, n_kv)
-#         attn = self.softmax(attn) 
-#         # （4）计算输出
-#         # (batch_size x 1 x n_kv)(batch_size x n_kv x kv_dim)
-#         # -> (batch_size, 1, kv_dim)
-#         output = torch.bmm(attn.unsqueeze(1), key_value).squeeze(1)
-#         return output, attn
-
-
-# 解码器前馈过程的实现流程如下：
-# 
-# （1）将图文数据按照文本的实际长度从长到短排序，这是为了模拟pack_padded_sequence函数的思想，方便后面使用动态的批大小，以避免<pad>参与运算带来的非必要的计算消耗。
-# 
-# ![pack_padded_sequence函数的作用的示例图](img/cr-pack_padded_sequence-example.png)
-#     
-# 
-# （2）在第一时刻解码前，使用图像表示来初始化GRU的隐状态。
-# 
-# （3）解码的每一时刻的具体操作可以分解为如下4个子操作：
-#     
-# - （3.1）获取实际的批大小；
-# 
-# - （3.2）利用GRU前一时刻最后一个隐藏层的状态作为查询，图像表示作为键和值，获取上下文向量；
-# 
-# - （3.3）将上下文向量和当前时刻输入的词表示拼接起来，作为GRU该时刻的输入，获得输出；
-# 
-# - （3.4）使用全连接层和softmax激活函数将GRU的输出映射为词表上的概率分布。
-
-
-
-
-# class AttentionDecoder(nn.Module):
-#     def __init__(self, image_code_dim, vocab_size, word_dim, attention_dim, hidden_size, num_layers, dropout=0.5):
-#         super(AttentionDecoder, self).__init__()
-#         self.embed = nn.Embedding(vocab_size, word_dim)
-#         self.attention = AdditiveAttention(hidden_size, image_code_dim, attention_dim)
-#         self.init_state = nn.Linear(image_code_dim, num_layers*hidden_size)
-#         self.rnn = nn.GRU(word_dim + image_code_dim, hidden_size, num_layers)
-#         self.dropout = nn.Dropout(p=dropout)
-#         self.fc = nn.Linear(hidden_size, vocab_size)
-#         # RNN默认已初始化
-#         self.init_weights()
-        
-#     def init_weights(self):
-#         self.embed.weight.data.uniform_(-0.1, 0.1)
-#         self.fc.bias.data.fill_(0)
-#         self.fc.weight.data.uniform_(-0.1, 0.1)
-    
-#     def init_hidden_state(self, image_code, captions, cap_lens):
-#         """
-#         参数：
-#             image_code：图像编码器输出的图像表示 
-#                         (batch_size, image_code_dim, grid_height, grid_width)
-#         """
-#         # 将图像网格表示转换为序列表示形式 
-#         batch_size, image_code_dim = image_code.size(0), image_code.size(1)
-#         # -> (batch_size, grid_height, grid_width, image_code_dim) 
-#         image_code = image_code.permute(0, 2, 3, 1)
-#         # -> (batch_size, grid_height * grid_width, image_code_dim)
-#         image_code = image_code.view(batch_size, -1, image_code_dim)
-#         # （1）按照caption的长短排序
-#         sorted_cap_lens, sorted_cap_indices = torch.sort(cap_lens, 0, True)
-#         captions = captions[sorted_cap_indices]
-#         image_code = image_code[sorted_cap_indices]
-#          #（2）初始化隐状态
-#         hidden_state = self.init_state(image_code.mean(axis=1))
-#         hidden_state = hidden_state.view(
-#                             batch_size, 
-#                             self.rnn.num_layers, 
-#                             self.rnn.hidden_size).permute(1, 0, 2)
-#         return image_code, captions, sorted_cap_lens, sorted_cap_indices, hidden_state
-
-#     def forward_step(self, image_code, curr_cap_embed, hidden_state):
-#         #（3.2）利用注意力机制获得上下文向量
-#         # query：hidden_state[-1]，即最后一个隐藏层输出 (batch_size, hidden_size)
-#         # context: (batch_size, hidden_size)
-#         context, alpha = self.attention(hidden_state[-1], image_code)
-#         #（3.3）以上下文向量和当前时刻词表示为输入，获得GRU输出
-#         x = torch.cat((context, curr_cap_embed), dim=-1).unsqueeze(0)
-#         # x: (1, real_batch_size, hidden_size+word_dim)
-#         # out: (1, real_batch_size, hidden_size)
-#         out, hidden_state = self.rnn(x, hidden_state)
-#         #（3.4）获取该时刻的预测结果
-#         # (real_batch_size, vocab_size)
-#         preds = self.fc(self.dropout(out.squeeze(0)))
-#         return preds, alpha, hidden_state
-        
-#     def forward(self, image_code, captions, cap_lens):
-#         """
-#         参数：
-#             hidden_state: (num_layers, batch_size, hidden_size)
-#             image_code:  (batch_size, feature_channel, feature_size)
-#             captions: (batch_size, )
-#         """
-#         # （1）将图文数据按照文本的实际长度从长到短排序
-#         # （2）获得GRU的初始隐状态
-#         image_code, captions, sorted_cap_lens, sorted_cap_indices, hidden_state \
-#             = self.init_hidden_state(image_code, captions, cap_lens)
-#         batch_size = image_code.size(0)
-#         # 输入序列长度减1，因为最后一个时刻不需要预测下一个词
-#         lengths = sorted_cap_lens.cpu().numpy() - 1
-#         # 初始化变量：模型的预测结果和注意力分数
-#         predictions = torch.zeros(batch_size, lengths[0], self.fc.out_features).to(captions.device)
-#         alphas = torch.zeros(batch_size, lengths[0], image_code.shape[1]).to(captions.device)
-#         # 获取文本嵌入表示 cap_embeds: (batch_size, num_steps, word_dim)
-#         cap_embeds = self.embed(captions)
-#         # Teacher-Forcing模式
-#         for step in range(lengths[0]):
-#             #（3）解码
-#             #（3.1）模拟pack_padded_sequence函数的原理，获取该时刻的非<pad>输入
-#             real_batch_size = np.where(lengths>step)[0].shape[0]
-#             preds, alpha, hidden_state = self.forward_step(
-#                             image_code[:real_batch_size], 
-#                             cap_embeds[:real_batch_size, step, :],
-#                             hidden_state[:, :real_batch_size, :].contiguous())            
-#             # 记录结果
-#             predictions[:real_batch_size, step, :] = preds
-#             alphas[:real_batch_size, step, :] = alpha
-#         return predictions, alphas, captions, lengths, sorted_cap_indices
 
 import math
 
@@ -510,7 +379,7 @@ class TransformerDecoder(nn.Module):
         super(TransformerDecoder, self).__init__()
         self.embed = nn.Embedding(vocab_size, word_dim)
         self.PE = PositionalEncoding(word_dim, dropout)
-        self.fc1 = nn.Linear(1000,512)
+
         decoder_layers = nn.TransformerDecoderLayer(
             d_model=word_dim, # 输入维度
             nhead=8,  # Number of heads in the multiheadattention models
@@ -524,11 +393,15 @@ class TransformerDecoder(nn.Module):
     def forward(self, image_code, captions, cap_lens):
         embed_captions = self.embed(captions)
         positional_encoding = self.PE(embed_captions)
-        image_code = self.fc1(image_code)
-        image_code = image_code.unsqueeze(1)
-        image_code = image_code.expand(-1, 122, -1)
+
+        self_attn_mask = get_attn_pad_mask(captions, captions)
+        dec_mask = get_attn_subsequent_mask(captions).to(image_code.device)
+
+        tgt_mask = torch.gt((self_attn_mask + dec_mask), 0)
+
+        tgt_mask = tgt_mask.unsqueeze(1).expand(-1, 8, -1, -1).reshape(-1, captions.size(1), captions.size(1))
         
-        out = self.transformer_decoder(positional_encoding, image_code)
+        out = self.transformer_decoder(positional_encoding, image_code, tgt_mask=tgt_mask)
         out = self.fc2(out)
         return out, captions
 # ### ARCTIC模型
@@ -550,39 +423,83 @@ class ARCTIC(nn.Module):
         image_code = self.encoder(images)
         return self.decoder(image_code, captions, cap_lens)
     
+
     def generate_by_beamsearch(self, images, beam_k, max_len):
-        # 编码图像
-        image_code = self.encoder(images)
-
-        # 初始化束搜索
-        initial_word = [self.vocab['<start>']] * beam_k
-        sequences = [[list(), 1.0] for _ in range(beam_k)]
-
-        # 循环生成序列
-        for _ in range(max_len):
-            all_candidates = list()
-            for i in range(beam_k):
-                seq, score = sequences[i]
-                if seq[-1] == self.vocab['<end>']:
-                    # 如果序列已经结束，直接将其添加到候选序列中
-                    all_candidates.append([seq, score])
+        vocab_size = len(self.vocab)
+        image_codes = self.encoder(images)
+        texts = []
+        device = images.device
+        # 对每个图像样本执行束搜索
+        for image_code in image_codes:
+            # 将图像表示复制k份
+            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
+            # 生成k个候选句子，初始时，仅包含开始符号<start>
+            cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
+            cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
+            sent_lens = torch.LongTensor([1]*beam_k).to(device)
+            # 获得GRU的初始隐状态
+            # image_code, cur_sent_embed, _, _, hidden_state = \
+            #     self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
+            # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
+            end_sents = []
+            # 存储已生成完整的句子的概率
+            end_probs = []
+            # 存储未完整生成的句子的概率
+            probs = torch.zeros(beam_k, 1).to(device)
+            k = beam_k
+            while True:
+                preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
+                # -> (k, vocab_size)
+                preds = nn.functional.log_softmax(preds, dim=1)
+                # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
+                # -> (k, vocab_size)
+                probs = probs.repeat(1,preds.size(1)) + preds
+                if cur_sents.size(1) == 1:
+                    # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
+                    values, indices = probs[0].topk(k, 0, True, True)
                 else:
-                    # 否则，生成下一个词
-                    input_seq = torch.LongTensor([seq]).to(images.device)
-                    output = self.decoder(image_code, input_seq)
-                    output = F.log_softmax(output, dim=-1)
-                    topk_scores, topk_words = output.topk(beam_k, dim=-1)
+                    # probs: (k, vocab_size) 是二维张量
+                    # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
+                    # 因此，将probs转换为一维张量，再使用topk函数获取最大的k个值
+                    values, indices = probs.view(-1).topk(k, 0, True, True)
+                # 计算最大的k个值对应的句子索引和词索引
+                sent_indices = torch.div(indices, vocab_size, rounding_mode='trunc') 
+                word_indices = indices % vocab_size 
+                # 将词拼接在前一轮的句子后，获得此轮的句子
+                cur_sents = torch.cat([cur_sents[sent_indices], word_indices.unsqueeze(1)], dim=1)
+                # 查找此轮生成句子结束符<end>的句子
+                end_indices = [idx for idx, word in enumerate(word_indices) if word == self.vocab['<end>']]
+                if len(end_indices) > 0:
+                    end_probs.extend(values[end_indices])
+                    end_sents.extend(cur_sents[end_indices].tolist())
+                    # 如果所有的句子都包含结束符，则停止生成
+                    k -= len(end_indices)
+                    if k == 0:
+                        break
+                # 查找还需要继续生成词的句子
+                cur_indices = [idx for idx, word in enumerate(word_indices) 
+                               if word != self.vocab['<end>']]
+                if len(cur_indices) > 0:
+                    cur_sent_indices = sent_indices[cur_indices]
+                    cur_word_indices = word_indices[cur_indices]
+                    # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
+                    cur_sents = cur_sents[cur_indices]
+                    probs = values[cur_indices].view(-1,1)
+                    hidden_state = hidden_state[:,cur_sent_indices,:]
+                    cur_sent_embed = self.decoder.embed(
+                        cur_word_indices.view(-1,1))[:,0,:]
+                # 句子太长，停止生成
+                if cur_sents.size(1) >= max_len:
+                    break
+            if len(end_sents) == 0:
+                # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
+                gen_sent = cur_sents[0].tolist()
+            else: 
+                # 否则选取包含结束符的句子中概率最大的句子
+                gen_sent = end_sents[end_probs.index(max(end_probs))]
+            texts.append(gen_sent)
+        return texts
 
-                    # 将生成的词添加到候选序列中
-                    for k in range(beam_k):
-                        word, new_score = topk_words[0][k], topk_scores[0][k]
-                        all_candidates.append([seq + [word.item()], score * new_score.item()])
-
-            # 选择得分最高的k个序列
-            ordered = sorted(all_candidates, key=lambda tup:tup[1], reverse=True)
-            sequences = ordered[:beam_k]
-
-        return sequences
 
 
 
@@ -781,7 +698,7 @@ def main():
         max_len = 30,
         captions_per_image = 5,
         batch_size = 8,
-        image_code_dim = 2048
+        image_code_dim = 2048,
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
