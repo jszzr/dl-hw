@@ -327,6 +327,7 @@ class ImageEncoder(nn.Module):
         out = self.fc(out)
         out = out.reshape(out.shape[0], -1, out.shape[1])
         return out
+        # -> (batch_size, 1, 512)
 
 
 # ### 文本解码器
@@ -390,7 +391,7 @@ class TransformerDecoder(nn.Module):
         self.transformer_decoder = nn.TransformerDecoder(decoder_layers, num_layers)
         self.fc2 = nn.Linear(hidden_size, vocab_size)
 
-    def forward(self, image_code, captions, cap_lens):
+    def forward(self, image_code, captions, cap_lens = None):
         embed_captions = self.embed(captions)
         positional_encoding = self.PE(embed_captions)
 
@@ -403,6 +404,7 @@ class TransformerDecoder(nn.Module):
         
         out = self.transformer_decoder(positional_encoding, image_code, tgt_mask=tgt_mask)
         out = self.fc2(out)
+        # -> (batchsize, seq_len, vocab_size)
         return out, captions
 # ### ARCTIC模型
 # 
@@ -426,34 +428,38 @@ class ARCTIC(nn.Module):
 
     def generate_by_beamsearch(self, images, beam_k, max_len):
         vocab_size = len(self.vocab)
+        # image -> (batchsize, 3, 224, 224)
         image_codes = self.encoder(images)
+        # -> (batchsize, 1, 512)
         texts = []
         device = images.device
-        # 对每个图像样本执行束搜索
+        # 对batchsize中每个图像样本执行束搜索
         for image_code in image_codes:
             # 将图像表示复制k份
-            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
+            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1)
+            # -> (beam_k, 1, 512)
             # 生成k个候选句子，初始时，仅包含开始符号<start>
             cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
+            # -> (beam_k, 1)
             cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
+            # -> (beam_k, 1, 512)
             sent_lens = torch.LongTensor([1]*beam_k).to(device)
-            # 获得GRU的初始隐状态
-            # image_code, cur_sent_embed, _, _, hidden_state = \
-            #     self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
             # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
             end_sents = []
             # 存储已生成完整的句子的概率
             end_probs = []
             # 存储未完整生成的句子的概率
             probs = torch.zeros(beam_k, 1).to(device)
+            # -> (beam_k, 1)
             k = beam_k
             while True:
-                preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
-                # -> (k, vocab_size)
+                preds, _ = self.decoder(image_code[:k], cur_sents)
+                # -> (k, len=1, vocab_size)
                 preds = nn.functional.log_softmax(preds, dim=1)
                 # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
-                # -> (k, vocab_size)
-                probs = probs.repeat(1,preds.size(1)) + preds
+                # -> (k, len=1, vocab_size)
+                probs = probs.repeat(1,preds.size(-1)) + preds[:, -1, :].view(k, -1)
+                # -> (k, k, vocab_size)
                 if cur_sents.size(1) == 1:
                     # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
                     values, indices = probs[0].topk(k, 0, True, True)
@@ -478,14 +484,14 @@ class ARCTIC(nn.Module):
                         break
                 # 查找还需要继续生成词的句子
                 cur_indices = [idx for idx, word in enumerate(word_indices) 
-                               if word != self.vocab['<end>']]
+                            if word != self.vocab['<end>']]
                 if len(cur_indices) > 0:
                     cur_sent_indices = sent_indices[cur_indices]
                     cur_word_indices = word_indices[cur_indices]
                     # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
                     cur_sents = cur_sents[cur_indices]
                     probs = values[cur_indices].view(-1,1)
-                    hidden_state = hidden_state[:,cur_sent_indices,:]
+                    # hidden_state = hidden_state[:,cur_sent_indices,:]
                     cur_sent_embed = self.decoder.embed(
                         cur_word_indices.view(-1,1))[:,0,:]
                 # 句子太长，停止生成
@@ -514,81 +520,81 @@ class ARCTIC(nn.Module):
 #         image_code = self.encoder(images)
 #         return self.decoder(image_code, captions, cap_lens)
     
-    # def generate_by_beamsearch(self, images, beam_k, max_len):
-    #     vocab_size = len(self.vocab)
-    #     image_codes = self.encoder(images)
-    #     texts = []
-    #     device = images.device
-    #     # 对每个图像样本执行束搜索
-    #     for image_code in image_codes:
-    #         # 将图像表示复制k份
-    #         image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
-    #         # 生成k个候选句子，初始时，仅包含开始符号<start>
-    #         cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
-    #         cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
-    #         sent_lens = torch.LongTensor([1]*beam_k).to(device)
-    #         # 获得GRU的初始隐状态
-    #         image_code, cur_sent_embed, _, _, hidden_state = \
-    #             self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
-    #         # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
-    #         end_sents = []
-    #         # 存储已生成完整的句子的概率
-    #         end_probs = []
-    #         # 存储未完整生成的句子的概率
-    #         probs = torch.zeros(beam_k, 1).to(device)
-    #         k = beam_k
-    #         while True:
-    #             preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
-    #             # -> (k, vocab_size)
-    #             preds = nn.functional.log_softmax(preds, dim=1)
-    #             # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
-    #             # -> (k, vocab_size)
-    #             probs = probs.repeat(1,preds.size(1)) + preds
-    #             if cur_sents.size(1) == 1:
-    #                 # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
-    #                 values, indices = probs[0].topk(k, 0, True, True)
-    #             else:
-    #                 # probs: (k, vocab_size) 是二维张量
-    #                 # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
-    #                 # 因此，将probs转换为一维张量，再使用topk函数获取最大的k个值
-    #                 values, indices = probs.view(-1).topk(k, 0, True, True)
-    #             # 计算最大的k个值对应的句子索引和词索引
-    #             sent_indices = torch.div(indices, vocab_size, rounding_mode='trunc') 
-    #             word_indices = indices % vocab_size 
-    #             # 将词拼接在前一轮的句子后，获得此轮的句子
-    #             cur_sents = torch.cat([cur_sents[sent_indices], word_indices.unsqueeze(1)], dim=1)
-    #             # 查找此轮生成句子结束符<end>的句子
-    #             end_indices = [idx for idx, word in enumerate(word_indices) if word == self.vocab['<end>']]
-    #             if len(end_indices) > 0:
-    #                 end_probs.extend(values[end_indices])
-    #                 end_sents.extend(cur_sents[end_indices].tolist())
-    #                 # 如果所有的句子都包含结束符，则停止生成
-    #                 k -= len(end_indices)
-    #                 if k == 0:
-    #                     break
-    #             # 查找还需要继续生成词的句子
-    #             cur_indices = [idx for idx, word in enumerate(word_indices) 
-    #                            if word != self.vocab['<end>']]
-    #             if len(cur_indices) > 0:
-    #                 cur_sent_indices = sent_indices[cur_indices]
-    #                 cur_word_indices = word_indices[cur_indices]
-    #                 # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
-    #                 cur_sents = cur_sents[cur_indices]
-    #                 probs = values[cur_indices].view(-1,1)
-    #                 hidden_state = hidden_state[:,cur_sent_indices,:]
-    #                 cur_sent_embed = self.decoder.embed(
-    #                     cur_word_indices.view(-1,1))[:,0,:]
-    #             # 句子太长，停止生成
-    #             if cur_sents.size(1) >= max_len:
-    #                 break
-    #         if len(end_sents) == 0:
-    #             # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
-    #             gen_sent = cur_sents[0].tolist()
-    #         else: 
-    #             # 否则选取包含结束符的句子中概率最大的句子
-    #             gen_sent = end_sents[end_probs.index(max(end_probs))]
-    #         texts.append(gen_sent)
-    #     return texts
+#     def generate_by_beamsearch(self, images, beam_k, max_len):
+#         vocab_size = len(self.vocab)
+#         image_codes = self.encoder(images)
+#         texts = []
+#         device = images.device
+#         # 对每个图像样本执行束搜索
+#         for image_code in image_codes:
+#             # 将图像表示复制k份
+#             image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
+#             # 生成k个候选句子，初始时，仅包含开始符号<start>
+#             cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
+#             cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
+#             sent_lens = torch.LongTensor([1]*beam_k).to(device)
+#             # 获得GRU的初始隐状态
+#             image_code, cur_sent_embed, _, _, hidden_state = \
+#                 self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
+#             # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
+#             end_sents = []
+#             # 存储已生成完整的句子的概率
+#             end_probs = []
+#             # 存储未完整生成的句子的概率
+#             probs = torch.zeros(beam_k, 1).to(device)
+#             k = beam_k
+#             while True:
+#                 preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
+#                 # -> (k, vocab_size)
+#                 preds = nn.functional.log_softmax(preds, dim=1)
+#                 # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
+#                 # -> (k, vocab_size)
+#                 probs = probs.repeat(1,preds.size(1)) + preds
+#                 if cur_sents.size(1) == 1:
+#                     # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
+#                     values, indices = probs[0].topk(k, 0, True, True)
+#                 else:
+#                     # probs: (k, vocab_size) 是二维张量
+#                     # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
+#                     # 因此，将probs转换为一维张量，再使用topk函数获取最大的k个值
+#                     values, indices = probs.view(-1).topk(k, 0, True, True)
+#                 # 计算最大的k个值对应的句子索引和词索引
+#                 sent_indices = torch.div(indices, vocab_size, rounding_mode='trunc') 
+#                 word_indices = indices % vocab_size 
+#                 # 将词拼接在前一轮的句子后，获得此轮的句子
+#                 cur_sents = torch.cat([cur_sents[sent_indices], word_indices.unsqueeze(1)], dim=1)
+#                 # 查找此轮生成句子结束符<end>的句子
+#                 end_indices = [idx for idx, word in enumerate(word_indices) if word == self.vocab['<end>']]
+#                 if len(end_indices) > 0:
+#                     end_probs.extend(values[end_indices])
+#                     end_sents.extend(cur_sents[end_indices].tolist())
+#                     # 如果所有的句子都包含结束符，则停止生成
+#                     k -= len(end_indices)
+#                     if k == 0:
+#                         break
+#                 # 查找还需要继续生成词的句子
+#                 cur_indices = [idx for idx, word in enumerate(word_indices) 
+#                             if word != self.vocab['<end>']]
+#                 if len(cur_indices) > 0:
+#                     cur_sent_indices = sent_indices[cur_indices]
+#                     cur_word_indices = word_indices[cur_indices]
+#                     # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
+#                     cur_sents = cur_sents[cur_indices]
+#                     probs = values[cur_indices].view(-1,1)
+#                     hidden_state = hidden_state[:,cur_sent_indices,:]
+#                     cur_sent_embed = self.decoder.embed(
+#                         cur_word_indices.view(-1,1))[:,0,:]
+#                 # 句子太长，停止生成
+#                 if cur_sents.size(1) >= max_len:
+#                     break
+#             if len(end_sents) == 0:
+#                 # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
+#                 gen_sent = cur_sents[0].tolist()
+#             else: 
+#                 # 否则选取包含结束符的句子中概率最大的句子
+#                 gen_sent = end_sents[end_probs.index(max(end_probs))]
+#             texts.append(gen_sent)
+#         return texts
 
 
 # ## 定义损失函数
@@ -654,6 +660,9 @@ def filter_useless_words(sent, filterd_words):
     return [w for w in sent if w not in filterd_words]
 
 def evaluate(data_loader, model, config):
+
+    new_vocab = {v : k for k, v in model.vocab.items()}
+
     model.eval()
     # 存储候选文本
     cands = []
@@ -667,6 +676,8 @@ def evaluate(data_loader, model, config):
         with torch.no_grad():
             # 通过束搜索，生成候选文本
             texts = model.generate_by_beamsearch(imgs.to(device), config.beam_k, config.max_len+2)
+            sentence = [new_vocab[i] for i in texts[0]]
+            print(sentence)
             # 候选文本
             cands.extend([filter_useless_words(text, filterd_words) for text in texts])
             # 参考文本
@@ -708,7 +719,7 @@ def main():
         num_epochs = 10,
         grad_clip = 5.0,
         alpha_weight = 1.0,
-        evaluate_step = 900, # 每隔多少步在验证集上测试一次
+        evaluate_step = 900, # 900, # 每隔多少步在验证集上测试一次
         checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
         best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
         last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
