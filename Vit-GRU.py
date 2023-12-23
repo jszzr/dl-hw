@@ -27,7 +27,7 @@
 # ### 下载数据集
 # 
 # - 我们使用的数据集为flickr8k([下载地址](https://www.kaggle.com/adityajn105/flickr8k))。
-# - 下载解压后，将其图片放在指定目录(本代码中将该目录设置为../data/flickr8k)下的images文件夹里。
+# - 下载解压后，将其图片放在指定目录(本代码中将该目录设置为./data/flickr8k)下的images文件夹里。
 # - 数据集包括8000张图片，每张图片对应5个句子描述。
 # - 数据集划分采用Karpathy提供的方法([下载地址](http://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip))，下载解压后，将其中的dataset_flickr8k.json文件拷贝到指定目录下。该划分方法将数据集分成3个子集：6,000张图片和其对应句子描述组成训练集，1,000张图片和描述为验证集，剩余的1,000张图片和描述为测试集。
 # 
@@ -40,10 +40,9 @@
 # - 对于图像，我们这里仅记录文件路径。
 # - - 如果机器的内存和硬盘空间就比较大，这里也可以将图片读取并处理成三维数组，这样在模型训练和测试的阶段，就不需要再直接读取图片。
 
+# In[5]:
 
 
-
-# get_ipython().run_line_magic('matplotlib', 'inline')
 import os
 import json
 import random 
@@ -63,9 +62,9 @@ from torch.utils.data import Dataset
 import torchvision
 import torchvision.transforms as transforms
 import nltk
-from torch.multiprocessing import freeze_support
 
 
+# In[6]:
 
 
 train_dataset_path = "./data/flickr8k/train_captions.json"
@@ -75,7 +74,7 @@ image_path = "./data/flickr8k/images/"
 output_path = "./data/flickr8k/"
 
 
-
+# In[7]:
 
 
 def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test_json_file = "./data/flickr8k/test_captions.json" , vocab_file = "./data/flickr8k/vocab.json", output_folder = "./data/flickr8k/"):
@@ -130,34 +129,32 @@ def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test
     for split in image_paths:
         imgpaths = image_paths[split]
         imcaps = image_captions[split]
-
-        enc_captions:list[list] = []
+      
+        enc_captions = []
 
         for i, path in enumerate(imgpaths):
             captions = imcaps[i]
-            # for j, c in enumerate(captions):
+          
+            for j, c in enumerate(captions):
                 # 对文本描述进行编码
-            enc_c: list[int] = [vocab['<start>']] + [vocab.get(word, vocab['<unk>']) for word in captions] + [vocab['<end>']] 
-            enc_captions.append(enc_c)
+                enc_c = [vocab['<start>']] + [vocab.get(word, vocab['<unk>']) for word in c] + [vocab['<end>']] 
+                enc_captions.append(enc_c)
         # 合法性检查
         # assert len(imgpaths) == len(enc_captions)
       
         # 存储数据
         data = {'IMAGES': imgpaths, 
                 'CAPTIONS': enc_captions}
-        print("数据集大小：", len(imgpaths))
-        print("数据集：", len(enc_captions))
         with open(os.path.join(output_folder, split + '_data.json'), 'w') as fw:
             json.dump(data, fw)
+  
 
 
 
-
-# create_dataset()
+create_dataset()
 
 
 # 在调用该函数生成需要的格式的数据集文件之后，我们可以展示其中一条数据，简单验证下数据的格式是否和我们预想的一致。
-
 
 
 
@@ -173,6 +170,7 @@ with open('./data/flickr8k/test_captions.json', 'r') as f:
     test_data = json.load(f)
 
 print("词典长度：", len(vocab))
+print("词典：", vocab)
 print("训练集json：", len(train_data))
 print("测试集json：", len(test_data))
 print("训练集json+测试集json：", len(train_data)+len(test_data))
@@ -191,7 +189,7 @@ print("images数量：", len(os.listdir('./data/flickr8k/images')))
 # 
 # 在PyTorch中定义数据集类非常简单，仅需要继承torch.utils.data.Dataset类，并实现\_\_getitem\_\_和\_\_len\_\_两个函数即可。
 
-
+# In[9]:
 
 
 class ImageTextDataset(Dataset):
@@ -225,7 +223,7 @@ class ImageTextDataset(Dataset):
         self.transform = transform
 
         # Total number of datapoints
-        self.dataset_size = len(self.data['CAPTIONS'])
+        self.dataset_size = len(self.data['IMAGES'])
 
     def __getitem__(self, i):
         # 第i个文本描述对应第(i // captions_per_image)张图片
@@ -243,12 +241,11 @@ class ImageTextDataset(Dataset):
         return self.dataset_size
 
 
-
 # ### 批量读取数据
 # 
 # 利用刚才构造的数据集类，借助DataLoader类构建能够按批次产生训练、验证和测试数据的对象。
 
-
+# In[10]:
 
 
 def mktrainval(data_dir, vocab_path, batch_size, workers=0):
@@ -269,14 +266,12 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
                                  vocab_path, 'train',  transform=train_tx)
     test_set = ImageTextDataset(os.path.join(data_dir, 'test_data.json'), 
                                  vocab_path, 'test', transform=test_tx)
-    print("训练集大小：", len(train_set))
-    print("测试集大小：", len(test_set))
 
     train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True, drop_last=True)
+        train_set, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
     
     test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, drop_last=True)
+        test_set, batch_size=batch_size, shuffle=False, num_workers=workers, pin_memory=True, drop_last=False)
 
     return train_loader, test_loader    
 
@@ -288,46 +283,45 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
 # ![ARCTIC的模型结构示意图](img/mt-cnn-attn.png)
 # 
 
-def get_attn_pad_mask(seq_q, seq_k):
-    batch_size, len_q = seq_q.size()
-    batch_size, len_k = seq_k.size()
-    # eq(zero) is PAD token
-    pad_attn_mask = seq_k.data.eq(0).unsqueeze(1)  # batch_size x 1 x len_k, one is masking
-    return pad_attn_mask.expand(batch_size, len_q, len_k)  # batch_size x len_q x len_k
-
-
-def get_attn_subsequent_mask(seq):
-    """
-    seq: [batch_size, tgt_len]
-    """
-    attn_shape = [seq.size(0), seq.size(1), seq.size(1)]
-    # attn_shape: [batch_size, tgt_len, tgt_len]
-    subsequence_mask = np.triu(np.ones(attn_shape), k=1)  # 生成一个上三角矩阵
-    subsequence_mask = torch.from_numpy(subsequence_mask).byte()
-    return subsequence_mask  # [batch_size, tgt_len, tgt_len]
-
 # ### 图像编码器
 # 
 # ARCTIC原始模型使用在ImageNet数据集上预训练过的分类模型VGG19作为图像编码器，VGG19最后一个卷积层作为网格表示提取层。而我们这里使用ResNet-101作为图像编码器，并将其最后一个非全连接层作为网格表示提取层。
 
+# In[11]:
 
+
+# from torchvision.models import ResNet101_Weights
+# class ImageEncoder(nn.Module):
+#     def __init__(self, finetuned=True):
+#         super(ImageEncoder, self).__init__()
+#         model = torchvision.models.resnet101(weights=ResNet101_Weights.DEFAULT)
+#         # ResNet-101网格表示提取器
+#         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
+#         for param in self.grid_rep_extractor.parameters():
+#             param.requires_grad = finetuned
+        
+#     def forward(self, images):
+#         out = self.grid_rep_extractor(images)
+#         print(out.shape)
+#         # -> (batch_size, image_code_dim 2048, grid_height 7, grid_width 7)
+#         return out
 
 from torchvision.models import vit_b_16
 class ImageEncoder(nn.Module):
     def __init__(self, finetuned=True):
         super(ImageEncoder, self).__init__()
         model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
-        self.grid_rep_extractor = model
-        self.fc = nn.Linear(1000, 512)
+        self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
+        self.conv_layer = nn.Conv2d(in_channels=768, out_channels=2048, kernel_size=2, stride=2)
+        # self.grid_rep_extractor = model
         for param in self.grid_rep_extractor.parameters():
             param.requires_grad = finetuned
         
     def forward(self, images):
         out = self.grid_rep_extractor(images)
-        out = self.fc(out)
-        out = out.reshape(out.shape[0], -1, out.shape[1])
+        out = self.conv_layer(out)
+        # print(out.shape)
         return out
-        # -> (batch_size, 1, 512)
 
 
 # ### 文本解码器
@@ -342,128 +336,210 @@ class ImageEncoder(nn.Module):
 # - 再通过softmax函数获取单个查询和所有键的关联程度，即归一化的相关性分数；
 # - 最后以相关性得分为权重，对值进行加权求和，计算输出特征。这里的值和键是同一组向量表示。
 
+# In[12]:
 
 
-
-import math
-
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout, max_len=122):
+class AdditiveAttention(nn.Module):
+    def  __init__(self, query_dim, key_dim, attn_dim):
         """
-        位置编码器类的初始化函数
-        
-        共有三个参数，分别是
-        d_model：词嵌入维度
-        dropout: dropout触发比率
-        max_len：每个句子的最大长度
+        参数：
+            query_dim: 查询Q的维度
+            key_dim: 键K的维度
+            attn_dim: 注意力函数隐藏层表示的维度
         """
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        
-        # Compute the positional encodings
-        pe = torch.zeros(max_len, d_model) # 构建位置编码的张量
-        position = torch.arange(0, max_len).unsqueeze(1) # 将每个token的位置（即从0到max_len-1）变为列向量
-        div_term = torch.exp(torch.arange(0, d_model, 2) *
-                             -(math.log(10000.0) / d_model)) # 计算
-        pe[:, 0::2] = torch.sin(position * div_term) # 使用了广播机制分配pe的不同列。这代表着从第0行开始每隔两列取一列。返回所有偶数位置的编码。
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0) # 最后增加了一个维度，也就是batch的维度。
-        self.register_buffer('pe', pe) #将位置编码张量存储在模型中。这是因为位置编码不需要进行训练，因此可以将其视为模型的一个固定部分。
-        
-    def forward(self, x):
-        x = x + self.pe[:, :x.size(1)].detach() # 从位置编码张量中取出对应长度的位置编码，并与输入的词嵌入相加。
-        return self.dropout(x)
+        super(AdditiveAttention, self).__init__()
+        self.attn_w_1_q = nn.Linear(query_dim, attn_dim)
+        self.attn_w_1_k = nn.Linear(key_dim, attn_dim)
+        self.attn_w_2 = nn.Linear(attn_dim, 1)
+        self.tanh = nn.Tanh()
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, query, key_value):
+        """
+        Q K V：Q和K算出相关性得分，作为V的权重，K=V
+        参数：
+            query: 查询 (batch_size, q_dim)
+            key_value: 键和值，(batch_size, n_kv, kv_dim)
+        """
+        # （2）计算query和key的相关性，实现注意力评分函数
+        # -> (batch_size, 1, attn_dim)
+        queries = self.attn_w_1_q(query).unsqueeze(1)
+        # -> (batch_size, n_kv, attn_dim)
+        keys = self.attn_w_1_k(key_value)
+        # -> (batch_size, n_kv)
+        attn = self.attn_w_2(self.tanh(queries+keys)).squeeze(2) 
+        # （3）归一化相关性分数
+        # -> (batch_size, n_kv)
+        attn = self.softmax(attn) 
+        # （4）计算输出
+        # (batch_size x 1 x n_kv)(batch_size x n_kv x kv_dim)
+        # -> (batch_size, 1, kv_dim)
+        output = torch.bmm(attn.unsqueeze(1), key_value).squeeze(1)
+        return output, attn
 
 
-class TransformerDecoder(nn.Module):
-    def __init__(self, vocab_size, word_dim, hidden_size, num_layers, dropout=0.2) -> None:
-        super(TransformerDecoder, self).__init__()
+# 解码器前馈过程的实现流程如下：
+# 
+# （1）将图文数据按照文本的实际长度从长到短排序，这是为了模拟pack_padded_sequence函数的思想，方便后面使用动态的批大小，以避免<pad>参与运算带来的非必要的计算消耗。
+# 
+# ![pack_padded_sequence函数的作用的示例图](img/cr-pack_padded_sequence-example.png)
+#     
+# 
+# （2）在第一时刻解码前，使用图像表示来初始化GRU的隐状态。
+# 
+# （3）解码的每一时刻的具体操作可以分解为如下4个子操作：
+#     
+# - （3.1）获取实际的批大小；
+# 
+# - （3.2）利用GRU前一时刻最后一个隐藏层的状态作为查询，图像表示作为键和值，获取上下文向量；
+# 
+# - （3.3）将上下文向量和当前时刻输入的词表示拼接起来，作为GRU该时刻的输入，获得输出；
+# 
+# - （3.4）使用全连接层和softmax激活函数将GRU的输出映射为词表上的概率分布。
+
+# In[13]:
+
+
+class AttentionDecoder(nn.Module):
+    def __init__(self, image_code_dim, vocab_size, word_dim, attention_dim, hidden_size, num_layers, dropout=0.5):
+        super(AttentionDecoder, self).__init__()
         self.embed = nn.Embedding(vocab_size, word_dim)
-        self.PE = PositionalEncoding(word_dim, dropout)
-
-        decoder_layers = nn.TransformerDecoderLayer(
-            d_model=word_dim, # 输入维度
-            nhead=8,  # Number of heads in the multiheadattention models
-            # dim_feedforward=768,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layers, num_layers)
-        self.fc2 = nn.Linear(hidden_size, vocab_size)
-
-    def forward(self, image_code, captions, cap_lens = None):
-        embed_captions = self.embed(captions)
-        positional_encoding = self.PE(embed_captions)
-
-        self_attn_mask = get_attn_pad_mask(captions, captions)
-        dec_mask = get_attn_subsequent_mask(captions).to(image_code.device)
-
-        tgt_mask = torch.gt((self_attn_mask + dec_mask), 0)
-
-        tgt_mask = tgt_mask.unsqueeze(1).expand(-1, 8, -1, -1).reshape(-1, captions.size(1), captions.size(1))
+        self.attention = AdditiveAttention(hidden_size, image_code_dim, attention_dim)
+        self.init_state = nn.Linear(image_code_dim, num_layers*hidden_size)
+        self.rnn = nn.GRU(word_dim + image_code_dim, hidden_size, num_layers)
+        self.dropout = nn.Dropout(p=dropout)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        # RNN默认已初始化
+        self.init_weights()
         
-        out = self.transformer_decoder(positional_encoding, image_code, tgt_mask=tgt_mask)
-        out = self.fc2(out)
-        # -> (batchsize, seq_len, vocab_size)
-        return out, captions
+    def init_weights(self):
+        self.embed.weight.data.uniform_(-0.1, 0.1)
+        self.fc.bias.data.fill_(0)
+        self.fc.weight.data.uniform_(-0.1, 0.1)
+    
+    def init_hidden_state(self, image_code, captions, cap_lens):
+        """
+        参数：
+            image_code：图像编码器输出的图像表示 
+                        (batch_size, image_code_dim, grid_height, grid_width)
+        """
+        # 将图像网格表示转换为序列表示形式 
+        batch_size, image_code_dim = image_code.size(0), image_code.size(1)
+        # -> (batch_size, grid_height, grid_width, image_code_dim) 
+        image_code = image_code.permute(0, 2, 3, 1)  
+        # -> (batch_size, grid_height * grid_width, image_code_dim)
+        image_code = image_code.view(batch_size, -1, image_code_dim)
+        # （1）按照caption的长短排序
+        sorted_cap_lens, sorted_cap_indices = torch.sort(cap_lens, 0, True)
+        captions = captions[sorted_cap_indices]
+        image_code = image_code[sorted_cap_indices]
+         #（2）初始化隐状态
+        hidden_state = self.init_state(image_code.mean(axis=1))
+        hidden_state = hidden_state.view(
+                            batch_size, 
+                            self.rnn.num_layers, 
+                            self.rnn.hidden_size).permute(1, 0, 2)
+        return image_code, captions, sorted_cap_lens, sorted_cap_indices, hidden_state
+
+    def forward_step(self, image_code, curr_cap_embed, hidden_state):
+        #（3.2）利用注意力机制获得上下文向量
+        # query：hidden_state[-1]，即最后一个隐藏层输出 (batch_size, hidden_size)
+        # context: (batch_size, hidden_size)
+        context, alpha = self.attention(hidden_state[-1], image_code)
+        #（3.3）以上下文向量和当前时刻词表示为输入，获得GRU输出
+        x = torch.cat((context, curr_cap_embed), dim=-1).unsqueeze(0)
+        # x: (1, real_batch_size, hidden_size+word_dim)
+        # out: (1, real_batch_size, hidden_size)
+        out, hidden_state = self.rnn(x, hidden_state)
+        #（3.4）获取该时刻的预测结果
+        # (real_batch_size, vocab_size)
+        preds = self.fc(self.dropout(out.squeeze(0)))
+        return preds, alpha, hidden_state
+        
+    def forward(self, image_code, captions, cap_lens):
+        """
+        参数：
+            hidden_state: (num_layers, batch_size, hidden_size)
+            image_code:  (batch_size, feature_channel, feature_size)
+            captions: (batch_size, )
+        """
+        # （1）将图文数据按照文本的实际长度从长到短排序
+        # （2）获得GRU的初始隐状态
+        image_code, captions, sorted_cap_lens, sorted_cap_indices, hidden_state \
+            = self.init_hidden_state(image_code, captions, cap_lens)
+        batch_size = image_code.size(0)
+        # 输入序列长度减1，因为最后一个时刻不需要预测下一个词
+        lengths = sorted_cap_lens.cpu().numpy() - 1
+        # 初始化变量：模型的预测结果和注意力分数
+        predictions = torch.zeros(batch_size, lengths[0], self.fc.out_features).to(captions.device)
+        alphas = torch.zeros(batch_size, lengths[0], image_code.shape[1]).to(captions.device)
+        # 获取文本嵌入表示 cap_embeds: (batch_size, num_steps, word_dim)
+        cap_embeds = self.embed(captions)
+        # Teacher-Forcing模式
+        for step in range(lengths[0]):
+            #（3）解码
+            #（3.1）模拟pack_padded_sequence函数的原理，获取该时刻的非<pad>输入
+            real_batch_size = np.where(lengths>step)[0].shape[0]
+            preds, alpha, hidden_state = self.forward_step(
+                            image_code[:real_batch_size], 
+                            cap_embeds[:real_batch_size, step, :],
+                            hidden_state[:, :real_batch_size, :].contiguous())            
+            # 记录结果
+            predictions[:real_batch_size, step, :] = preds
+            alphas[:real_batch_size, step, :] = alpha
+        return predictions, alphas, captions, lengths, sorted_cap_indices
+
+
 # ### ARCTIC模型
 # 
 # 在定义编码器和解码器完成之后，我们就很容易构建图像描述模型ARCTIC了。仅需要在初始化函数时声明编码器和解码器，然后在前馈函数实现里，将编码器的输出和文本描述作为解码器的输入即可。
 # 
 # 这里我们额外定义了束搜索采样函数，用于生成句子，以计算BLEU值。下面的代码详细标注了其具体实现。
 
-from torch.nn import functional as F
-# torch.set_printoptions(threshold=torch.inf)
+# In[14]:
+
+
 class ARCTIC(nn.Module):
     def __init__(self, image_code_dim, vocab, word_dim, attention_dim, hidden_size, num_layers):
         super(ARCTIC, self).__init__()
         self.vocab = vocab
         self.encoder = ImageEncoder()
-        self.decoder = TransformerDecoder(len(vocab), word_dim, hidden_size, num_layers)
+        self.decoder = AttentionDecoder(image_code_dim, len(vocab), word_dim, attention_dim, hidden_size, num_layers)
 
     def forward(self, images, captions, cap_lens):
         image_code = self.encoder(images)
         return self.decoder(image_code, captions, cap_lens)
     
-
     def generate_by_beamsearch(self, images, beam_k, max_len):
         vocab_size = len(self.vocab)
-        # image -> (batchsize, 3, 224, 224)
         image_codes = self.encoder(images)
-        # -> (batchsize, 1, 512)
         texts = []
         device = images.device
-        # 对batchsize中每个图像样本执行束搜索
+        # 对每个图像样本执行束搜索
         for image_code in image_codes:
             # 将图像表示复制k份
-            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1)
-            # -> (beam_k, 1, 512)
+            image_code = image_code.unsqueeze(0).repeat(beam_k,1,1,1)
             # 生成k个候选句子，初始时，仅包含开始符号<start>
             cur_sents = torch.full((beam_k, 1), self.vocab['<start>'], dtype=torch.long).to(device)
-            # -> (beam_k, 1)
             cur_sent_embed = self.decoder.embed(cur_sents)[:,0,:]
-            # -> (beam_k, 1, 512)
             sent_lens = torch.LongTensor([1]*beam_k).to(device)
+            # 获得GRU的初始隐状态
+            image_code, cur_sent_embed, _, _, hidden_state = \
+                self.decoder.init_hidden_state(image_code, cur_sent_embed, sent_lens)
             # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
             end_sents = []
             # 存储已生成完整的句子的概率
             end_probs = []
             # 存储未完整生成的句子的概率
             probs = torch.zeros(beam_k, 1).to(device)
-            # -> (beam_k, 1)
             k = beam_k
             while True:
-                preds, _ = self.decoder(image_code[:k], cur_sents)
-                # print(preds)
-                log_soft = nn.LogSoftmax(dim=2)
-                # -> (k, len=1, vocab_size)
-                preds = log_soft(preds)
-                # print(preds)
+                preds, _, hidden_state = self.decoder.forward_step(image_code[:k], cur_sent_embed, hidden_state.contiguous())
+                # -> (k, vocab_size)
+                preds = nn.functional.log_softmax(preds, dim=1)
                 # 对每个候选句子采样概率值最大的前k个单词生成k个新的候选句子，并计算概率
-                # -> (k, len=1, vocab_size)
-                probs = probs.repeat(1,preds.size(-1)) + preds[:, -1, :].view(k, -1)
-                # print(preds[:, -1, :].view(k, -1))
-                # -> (k, k, vocab_size)
+                # -> (k, vocab_size)
+                probs = probs.repeat(1,preds.size(1)) + preds
                 if cur_sents.size(1) == 1:
                     # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
                     values, indices = probs[0].topk(k, 0, True, True)
@@ -488,14 +564,14 @@ class ARCTIC(nn.Module):
                         break
                 # 查找还需要继续生成词的句子
                 cur_indices = [idx for idx, word in enumerate(word_indices) 
-                            if word != self.vocab['<end>']]
+                               if word != self.vocab['<end>']]
                 if len(cur_indices) > 0:
                     cur_sent_indices = sent_indices[cur_indices]
                     cur_word_indices = word_indices[cur_indices]
                     # 仅保留还需要继续生成的句子、句子概率、隐状态、词嵌入
                     cur_sents = cur_sents[cur_indices]
                     probs = values[cur_indices].view(-1,1)
-                    # hidden_state = hidden_state[:,cur_sent_indices,:]
+                    hidden_state = hidden_state[:,cur_sent_indices,:]
                     cur_sent_embed = self.decoder.embed(
                         cur_word_indices.view(-1,1))[:,0,:]
                 # 句子太长，停止生成
@@ -510,11 +586,12 @@ class ARCTIC(nn.Module):
             texts.append(gen_sent)
         return texts
 
+
 # ## 定义损失函数
 # 
 # 这里采用了最常用的交叉熵损失作为损失函数。由于同一个训练批次里的文本描述的长度不一致，因此，有大量的不需要计算损失的<pad>目标。为了避免计算资源的浪费，这里先将数据按照文本长度排序，再利用pack_padded_sequence函数将预测目标为\<pad\>的数据去除，最后再利用交叉熵损失计算实际的损失。
 
-
+# In[15]:
 
 
 class PackedCrossEntropyLoss(nn.Module):
@@ -529,9 +606,8 @@ class PackedCrossEntropyLoss(nn.Module):
             targets：按文本长度排序过的文本描述
             lengths：文本长度
         """
-        lengths = lengths.to(torch.device('cpu'))
-        predictions = pack_padded_sequence(predictions, lengths, batch_first=True, enforce_sorted=False)[0]
-        targets = pack_padded_sequence(targets, lengths, batch_first=True, enforce_sorted=False)[0]
+        predictions = pack_padded_sequence(predictions, lengths, batch_first=True)[0]
+        targets = pack_padded_sequence(targets, lengths, batch_first=True)[0]
         return self.loss_fn(predictions, targets)
         
 
@@ -540,7 +616,7 @@ class PackedCrossEntropyLoss(nn.Module):
 # 
 # 这里选用Adam优化算法来更新模型参数，由于数据集较小，训练轮次少，因此，学习速率在训练过程中并不调整。但是对编码器和解码器采用了不同的学习速率。具体来说，预训练的图像编码器的学习速率小于需要从头开始训练的文本解码器的学习速率。
 
-
+# In[16]:
 
 
 def get_optimizer(model, config):
@@ -548,7 +624,7 @@ def get_optimizer(model, config):
                               "lr": config.encoder_learning_rate},
                              {"params": filter(lambda p: p.requires_grad, model.decoder.parameters()), 
                               "lr": config.decoder_learning_rate}])
-
+    
 def adjust_learning_rate(optimizer, epoch, config):
     """
         每隔lr_update个轮次，学习速率减小至当前十分之一，
@@ -563,7 +639,7 @@ def adjust_learning_rate(optimizer, epoch, config):
 # 这里借助nltk库实现了图像描述中最常用的评估指标BLEU值，需要注意的是，再调用计算BLEU值之前，要先将文本中人工添加的文本开始符、结束符和占位符去掉。
 # 
 
-
+# In[17]:
 
 
 from nltk.translate.bleu_score import corpus_bleu
@@ -572,11 +648,9 @@ def filter_useless_words(sent, filterd_words):
     # 去除句子中不参与BLEU值计算的符号
     return [w for w in sent if w not in filterd_words]
 
+@torch.no_grad()
 def evaluate(data_loader, model, config):
-
-    new_vocab = {v : k for k, v in model.vocab.items()}
-
-    model.eval()
+    # model.eval()
     # 存储候选文本
     cands = []
     # 存储参考文本
@@ -589,9 +663,6 @@ def evaluate(data_loader, model, config):
         with torch.no_grad():
             # 通过束搜索，生成候选文本
             texts = model.generate_by_beamsearch(imgs.to(device), config.beam_k, config.max_len+2)
-            sentence_list = [new_vocab[i] for i in texts[0]]
-            sentence = ' '.join(sentence_list)
-            print(sentence)
             # 候选文本
             cands.extend([filter_useless_words(text, filterd_words) for text in texts])
             # 参考文本
@@ -615,10 +686,11 @@ def evaluate(data_loader, model, config):
 # 
 # <!-- 模型训练的具体方案为一共训练30轮，初始编码器和解码器的学习速率分别为0.0001和0.0005，每10轮将学习速率变为原数值的1/10。 -->
 
+# In[19]:
 
-def main():
-    # 设置模型超参数和辅助变量
-    # freeze_support()
+
+# 设置模型超参数和辅助变量
+if __name__ == '__main__':
     config = Namespace(
         max_len = 60,
         captions_per_image = 1,
@@ -627,13 +699,13 @@ def main():
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
-        num_layers = 3,
+        num_layers = 1,
         encoder_learning_rate = 0.0001,
         decoder_learning_rate = 0.0005,
         num_epochs = 10,
         grad_clip = 5.0,
         alpha_weight = 1.0,
-        evaluate_step = 200, # 900, # 每隔多少步在验证集上测试一次
+        evaluate_step = 900, # 每隔多少步在验证集上测试一次
         checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
         best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
         last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
@@ -641,9 +713,8 @@ def main():
     )
 
     # 设置GPU信息
+    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
-    # print("使用设备：", device)
-    # device = torch.device("cpu")
 
     # 数据
     data_dir = './data/flickr8k/'
@@ -677,6 +748,7 @@ def main():
     best_res = 0
     print("开始训练")
     fw = open('log.txt', 'w')
+
     for epoch in range(start_epoch, config.num_epochs):
         for i, (imgs, caps, caplens) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -686,14 +758,13 @@ def main():
             caplens = caplens.to(device)
 
             # 2. 前馈计算
-            predictions, captions = model(imgs, caps, caplens)
-            
+            predictions, alphas, sorted_captions, lengths, sorted_cap_indices = model(imgs, caps, caplens)
             # 3. 计算损失
             # captions从第2个词开始为targets
-            loss = loss_fn(predictions, captions[:, 1:], caplens)
+            loss = loss_fn(predictions, sorted_captions[:, 1:], lengths)
             # 重随机注意力正则项，使得模型尽可能全面的利用到每个网格
             # 要求所有时刻在同一个网格上的注意力分数的平方和接近1
-            # loss += config.alpha_weight * ((1. - alphas.sum(axis=1)) ** 2).mean()
+            loss += config.alpha_weight * ((1. - alphas.sum(axis=1)) ** 2).mean()
 
             loss.backward()
             # 梯度截断
@@ -734,10 +805,8 @@ def main():
         (checkpoint['epoch'], bleu_score))
     fw.write('Epoch: %d, BLEU-4=%.2f' % 
         (checkpoint['epoch'], bleu_score))
-    fw.close()
+    fw.close()      
 
-if __name__ == '__main__':
-    main()
 
 # 这段代码完成训练，最后一行会输出在验证集上表现最好的模型在测试集上的结果，具体如下：
 # 
