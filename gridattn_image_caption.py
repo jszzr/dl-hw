@@ -426,7 +426,7 @@ class ARCTIC(nn.Module):
         return self.decoder(image_code, captions, cap_lens)
     
 
-    def generate_by_beamsearch(self, images, beam_k, max_len):
+    def generate_by_beamsearch(self, images, beam_k=5, max_len=120):
         vocab_size = len(self.vocab)
         # image -> (batchsize, 3, 224, 224)
         image_codes = self.encoder(images)
@@ -467,6 +467,11 @@ class ARCTIC(nn.Module):
                 if cur_sents.size(1) == 1:
                     # 第一步时，所有句子都只包含开始标识符，因此，仅利用其中一个句子计算topk
                     values, indices = probs[0].topk(k, 0, True, True)
+                    for index ,(v, i) in enumerate(zip(values, indices)):
+                        if i == 113:
+                            values_temp, indices_temp = probs[0].topk(k + 1, 0, True, True)
+                            values[index] = values_temp[-1]
+                            indices[index] = indices_temp[-1]
                 else:
                     # probs: (k, vocab_size) 是二维张量
                     # topk函数直接应用于二维张量会按照指定维度取最大值，这里需要在全局取最大值
@@ -501,6 +506,9 @@ class ARCTIC(nn.Module):
                 # 句子太长，停止生成
                 if cur_sents.size(1) >= max_len:
                     break
+            
+            # end_sents = [sublist for sublist in end_sents if sublist != [112, 113]]
+
             if len(end_sents) == 0:
                 # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
                 gen_sent = cur_sents[0].tolist()
@@ -567,16 +575,20 @@ def adjust_learning_rate(optimizer, epoch, config):
 
 
 from nltk.translate.bleu_score import corpus_bleu
+from nltk.translate.meteor_score import meteor_score
+from rouge import Rouge
+rouge = Rouge()
 
 def filter_useless_words(sent, filterd_words):
     # 去除句子中不参与BLEU值计算的符号
     return [w for w in sent if w not in filterd_words]
 
+@torch.no_grad()
 def evaluate(data_loader, model, config):
 
     new_vocab = {v : k for k, v in model.vocab.items()}
 
-    model.eval()
+    # model.eval()
     # 存储候选文本
     cands = []
     # 存储参考文本
@@ -603,6 +615,8 @@ def evaluate(data_loader, model, config):
     # 计算BLEU-4值，corpus_bleu函数默认weights权重为(0.25,0.25,0.25,0.25)
     # 即计算1-gram到4-gram的BLEU几何平均值
     bleu4 = corpus_bleu(multiple_refs, cands, weights=(0.25,0.25,0.25,0.25))
+    # bleu4 = meteor_score(multiple_refs, cands)
+    # bleu4 = rouge.get_scores(multiple_refs, cands)
     model.train()
     return bleu4
 
@@ -620,25 +634,27 @@ def main():
     # 设置模型超参数和辅助变量
     # freeze_support()
     config = Namespace(
-        max_len = 60,
+        max_len = 120,
         captions_per_image = 1,
-        batch_size = 8,
+        batch_size = 32,
         image_code_dim = 2048,
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
         num_layers = 3,
-        encoder_learning_rate = 0.0001,
-        decoder_learning_rate = 0.0005,
-        num_epochs = 10,
+        encoder_learning_rate = 0.00001,
+        decoder_learning_rate = 0.00005,
+        num_epochs = 30,
         grad_clip = 5.0,
         alpha_weight = 1.0,
-        evaluate_step = 200, # 900, # 每隔多少步在验证集上测试一次
-        checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
+        evaluate_step = 900, # 900, # 每隔多少步在验证集上测试一次
+        checkpoint = "./model/ARCTIC/last_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
         best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
         last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
         beam_k = 5
     )
+
+
 
     # 设置GPU信息
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
@@ -663,7 +679,8 @@ def main():
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         model = checkpoint['model']
-
+    
+    last_epoch = start_epoch
     # 优化器
     optimizer = get_optimizer(model, config)
 
@@ -676,6 +693,9 @@ def main():
 
     best_res = 0
     print("开始训练")
+    # bleu_score = evaluate(test_loader, model, config)
+    # print('Validation@BLEU-4=%.2f' % 
+    # (bleu_score))
     fw = open('log.txt', 'w')
     for epoch in range(start_epoch, config.num_epochs):
         for i, (imgs, caps, caplens) in enumerate(train_loader):
@@ -714,7 +734,8 @@ def main():
                     'model': model,
                     'optimizer': optimizer
                     }
-            if (i+1) % config.evaluate_step == 0:
+            if epoch - last_epoch == 4: #(i+1) % config.evaluate_step == 0:
+                last_epoch = epoch
                 bleu_score = evaluate(test_loader, model, config)
                 # 5. 选择模型
                 if best_res < bleu_score:
