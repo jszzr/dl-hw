@@ -225,7 +225,7 @@ class ImageTextDataset(Dataset):
         self.transform = transform
 
         # Total number of datapoints
-        self.dataset_size = len(self.data['CAPTIONS'])
+        self.dataset_size = len(self.data['IMAGES'])
 
     def __getitem__(self, i):
         # 第i个文本描述对应第(i // captions_per_image)张图片
@@ -636,7 +636,7 @@ def main():
     config = Namespace(
         max_len = 120,
         captions_per_image = 1,
-        batch_size = 32,
+        batch_size = 16,
         image_code_dim = 2048,
         word_dim = 512,
         hidden_size = 512,
@@ -647,10 +647,10 @@ def main():
         num_epochs = 30,
         grad_clip = 5.0,
         alpha_weight = 1.0,
-        evaluate_step = 900, # 900, # 每隔多少步在验证集上测试一次
-        checkpoint = "./model/ARCTIC/last_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
-        best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
-        last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
+        evaluate_step = 2000, # 900, # 每隔多少步在验证集上测试一次
+        checkpoint = "./model_1/last_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
+        best_checkpoint = './model_1/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
+        last_checkpoint = './model_1/last_flickr8k.ckpt', # 训练完成时的模型的路径
         beam_k = 5
     )
 
@@ -693,9 +693,9 @@ def main():
 
     best_res = 0
     print("开始训练")
-    # bleu_score = evaluate(test_loader, model, config)
-    # print('Validation@BLEU-4=%.2f' % 
-    # (bleu_score))
+    bleu_score = evaluate(test_loader, model, config)
+    print('Validation@BLEU-4=%.2f' % 
+    (bleu_score))
     fw = open('log.txt', 'w')
     for epoch in range(start_epoch, config.num_epochs):
         for i, (imgs, caps, caplens) in enumerate(train_loader):
@@ -734,7 +734,7 @@ def main():
                     'model': model,
                     'optimizer': optimizer
                     }
-            if epoch - last_epoch == 4: #(i+1) % config.evaluate_step == 0:
+            if epoch - last_epoch == 3: #(i+1) % config.evaluate_step == 0:
                 last_epoch = epoch
                 bleu_score = evaluate(test_loader, model, config)
                 # 5. 选择模型

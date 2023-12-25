@@ -1,48 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # 实战案例：基于注意力的图像描述模型（ARCTIC）
-# 
-# ## 模型训练流程
-# 
-# ![模型训练的一般流程](img/cr-traning_process.png)
-# 
-
-# 在现代的深度学习框架基础下，模型训练的一般流程包括读取数据、前馈计算、计算损失、更新参数、选择模型五个步骤。每个步骤需要实现相应的模块。
-# 
-# - 在读取数据阶段，我们首先需要下载数据集，然后对整理数据集的格式，以方便接下来构造数据集类，最后在数据集类的基础上构建能够按批次产生训练、验证和测试数据的对象。
-# 
-# - 在前馈计算阶段，我们需要实现具体的模型，使得模型能够根据输入产生相应的输出。
-# 
-# - 在计算损失阶段，我们需要将模型输出和预期输出进行对比，实现损失函数。
-# 
-# - 在更新参数阶段，我们需要给出具体的参数更新方法，即优化方法；由于现代深度学习框架能够自动计算参数梯度，并实现了绝大多数优化方法，我们通常只需要从中进行选择即可。
-# 
-# - 在选择模型阶段，我们需要实现具体的评估指标，选出在验证集上表现最优的模型参数。
-# 
-# 下面，我们将按照这个次序介绍一个图像编码器为CNN网格表示提取器、文本解码器为RNN+注意力的图像描述方法的具体实现。我们的实现大体上是在复现ARCTIC模型，但是在细节上有一些改变，下面的实现过程会对这些改变做具体说明。此外，[链接](https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Image-Captioning)给出了一个更接近原始ARCTIC模型的代码库，非常推荐大家阅读。本节的部分代码也是受到该代码库的启发。
-
-# ## 读取数据
-# 
-# ### 下载数据集
-# 
-# - 我们使用的数据集为flickr8k([下载地址](https://www.kaggle.com/adityajn105/flickr8k))。
-# - 下载解压后，将其图片放在指定目录(本代码中将该目录设置为./data/flickr8k)下的images文件夹里。
-# - 数据集包括8000张图片，每张图片对应5个句子描述。
-# - 数据集划分采用Karpathy提供的方法([下载地址](http://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip))，下载解压后，将其中的dataset_flickr8k.json文件拷贝到指定目录下。该划分方法将数据集分成3个子集：6,000张图片和其对应句子描述组成训练集，1,000张图片和描述为验证集，剩余的1,000张图片和描述为测试集。
-# 
-# 
-
-# ### 整理数据集
-# 
-# 数据集下载完成后，我们需要对其进行处理，以适合之后构造的PyTorch数据集类读取。
-# - 对于文本描述，我们首先构建词典，然后根据词典将文本描述转化为向量。
-# - 对于图像，我们这里仅记录文件路径。
-# - - 如果机器的内存和硬盘空间就比较大，这里也可以将图片读取并处理成三维数组，这样在模型训练和测试的阶段，就不需要再直接读取图片。
-
-# In[5]:
-
-
 import os
 import json
 import random 
@@ -64,7 +19,6 @@ import torchvision.transforms as transforms
 import nltk
 
 
-# In[6]:
 
 
 train_dataset_path = "./data/flickr8k/train_captions.json"
@@ -73,8 +27,6 @@ vocab_path = "./data/flickr8k/vocab.json"
 image_path = "./data/flickr8k/images/"
 output_path = "./data/flickr8k/"
 
-
-# In[7]:
 
 
 def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test_json_file = "./data/flickr8k/test_captions.json" , vocab_file = "./data/flickr8k/vocab.json", output_folder = "./data/flickr8k/"):
@@ -151,12 +103,7 @@ def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test
 
 
 
-create_dataset()
-
-
-# 在调用该函数生成需要的格式的数据集文件之后，我们可以展示其中一条数据，简单验证下数据的格式是否和我们预想的一致。
-
-
+# create_dataset()
 
 # 读取词典和验证集
 with open('./data/flickr8k/vocab.json', 'r') as f:
@@ -176,20 +123,7 @@ print("测试集json：", len(test_data))
 print("训练集json+测试集json：", len(train_data)+len(test_data))
 print("images数量：", len(os.listdir('./data/flickr8k/images')))
 
-# # 展示第12张图片，其对应的文本描述序号是60到64
-# content_img = Image.open(data['IMAGES'][12])
-# plt.imshow(content_img)
-# for i in range(5):
-#     print(' '.join([vocab_idx2word[word_idx] for word_idx in data['CAPTIONS'][12*5+i]]))
 
-
-# ### 定义数据集类
-# 
-# 在准备好的数据集的基础上，我们需要进一步定义PyTorch Dataset类，以使用PyTorch DataLoader类按批次产生数据。PyTorch中仅预先定义了图像、文本和语音的单模态任务中常见的数据集类。因此，我们需要定义自己的数据集类。
-# 
-# 在PyTorch中定义数据集类非常简单，仅需要继承torch.utils.data.Dataset类，并实现\_\_getitem\_\_和\_\_len\_\_两个函数即可。
-
-# In[9]:
 
 
 class ImageTextDataset(Dataset):
@@ -241,11 +175,6 @@ class ImageTextDataset(Dataset):
         return self.dataset_size
 
 
-# ### 批量读取数据
-# 
-# 利用刚才构造的数据集类，借助DataLoader类构建能够按批次产生训练、验证和测试数据的对象。
-
-# In[10]:
 
 
 def mktrainval(data_dir, vocab_path, batch_size, workers=0):
@@ -276,36 +205,6 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
     return train_loader, test_loader    
 
 
-# ## 定义模型
-# 
-# ARCTIC模型是一个典型的基于注意力的编解码模型，其编码器为图像网格表示提取器，解码器为循环神经网络。解码器在每生成一个词时，都利用注意力机制考虑当前生成的词和图像中的哪些网格更相关。
-# 
-# ![ARCTIC的模型结构示意图](img/mt-cnn-attn.png)
-# 
-
-# ### 图像编码器
-# 
-# ARCTIC原始模型使用在ImageNet数据集上预训练过的分类模型VGG19作为图像编码器，VGG19最后一个卷积层作为网格表示提取层。而我们这里使用ResNet-101作为图像编码器，并将其最后一个非全连接层作为网格表示提取层。
-
-# In[11]:
-
-
-# from torchvision.models import ResNet101_Weights
-# class ImageEncoder(nn.Module):
-#     def __init__(self, finetuned=True):
-#         super(ImageEncoder, self).__init__()
-#         model = torchvision.models.resnet101(weights=ResNet101_Weights.DEFAULT)
-#         # ResNet-101网格表示提取器
-#         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
-#         for param in self.grid_rep_extractor.parameters():
-#             param.requires_grad = finetuned
-        
-#     def forward(self, images):
-#         out = self.grid_rep_extractor(images)
-#         print(out.shape)
-#         # -> (batch_size, image_code_dim 2048, grid_height 7, grid_width 7)
-#         return out
-
 from torchvision.models import vit_b_16
 class ImageEncoder(nn.Module):
     def __init__(self, finetuned=True):
@@ -318,25 +217,14 @@ class ImageEncoder(nn.Module):
             param.requires_grad = finetuned
         
     def forward(self, images):
+        self.grid_rep_extractor.to(images.device)
+        self.conv_layer.to(images.device)
         out = self.grid_rep_extractor(images)
         out = self.conv_layer(out)
         # print(out.shape)
         return out
 
 
-# ### 文本解码器
-# 
-# ARCTIC原始模型使用结合注意力的LSTM作为文本解码器，我们这里使用结合注意力的GRU作为文本解码器，注意力评分函数采用的是加性注意力。下面给出加性注意力和解码器的具体实现。
-# 
-
-# 加性注意力评分函数的具体形式为 $W_2^T{\rm tanh}(W_1 [\mathbf{q}_i; \mathbf{k}_j])$ 。
-# 
-# - 首先将权重 $W_1$ 依照查询q和键k的维度，相应地拆成两组权重，分别将单个查询和一组键映射到到注意力函数隐藏层表示空间；
-# - 然后将二者相加得到一组维度为attn_dim的表示，并在经过非线性变换后，使用形状为(attn_dim, 1) 的权重 $W_2$ 将其映射为一组数值；
-# - 再通过softmax函数获取单个查询和所有键的关联程度，即归一化的相关性分数；
-# - 最后以相关性得分为权重，对值进行加权求和，计算输出特征。这里的值和键是同一组向量表示。
-
-# In[12]:
 
 
 class AdditiveAttention(nn.Module):
@@ -378,26 +266,6 @@ class AdditiveAttention(nn.Module):
         return output, attn
 
 
-# 解码器前馈过程的实现流程如下：
-# 
-# （1）将图文数据按照文本的实际长度从长到短排序，这是为了模拟pack_padded_sequence函数的思想，方便后面使用动态的批大小，以避免<pad>参与运算带来的非必要的计算消耗。
-# 
-# ![pack_padded_sequence函数的作用的示例图](img/cr-pack_padded_sequence-example.png)
-#     
-# 
-# （2）在第一时刻解码前，使用图像表示来初始化GRU的隐状态。
-# 
-# （3）解码的每一时刻的具体操作可以分解为如下4个子操作：
-#     
-# - （3.1）获取实际的批大小；
-# 
-# - （3.2）利用GRU前一时刻最后一个隐藏层的状态作为查询，图像表示作为键和值，获取上下文向量；
-# 
-# - （3.3）将上下文向量和当前时刻输入的词表示拼接起来，作为GRU该时刻的输入，获得输出；
-# 
-# - （3.4）使用全连接层和softmax激活函数将GRU的输出映射为词表上的概率分布。
-
-# In[13]:
 
 
 class AttentionDecoder(nn.Module):
@@ -490,15 +358,6 @@ class AttentionDecoder(nn.Module):
         return predictions, alphas, captions, lengths, sorted_cap_indices
 
 
-# ### ARCTIC模型
-# 
-# 在定义编码器和解码器完成之后，我们就很容易构建图像描述模型ARCTIC了。仅需要在初始化函数时声明编码器和解码器，然后在前馈函数实现里，将编码器的输出和文本描述作为解码器的输入即可。
-# 
-# 这里我们额外定义了束搜索采样函数，用于生成句子，以计算BLEU值。下面的代码详细标注了其具体实现。
-
-# In[14]:
-
-
 class ARCTIC(nn.Module):
     def __init__(self, image_code_dim, vocab, word_dim, attention_dim, hidden_size, num_layers):
         super(ARCTIC, self).__init__()
@@ -587,13 +446,6 @@ class ARCTIC(nn.Module):
         return texts
 
 
-# ## 定义损失函数
-# 
-# 这里采用了最常用的交叉熵损失作为损失函数。由于同一个训练批次里的文本描述的长度不一致，因此，有大量的不需要计算损失的<pad>目标。为了避免计算资源的浪费，这里先将数据按照文本长度排序，再利用pack_padded_sequence函数将预测目标为\<pad\>的数据去除，最后再利用交叉熵损失计算实际的损失。
-
-# In[15]:
-
-
 class PackedCrossEntropyLoss(nn.Module):
     def __init__(self):
         super(PackedCrossEntropyLoss, self).__init__()
@@ -612,13 +464,6 @@ class PackedCrossEntropyLoss(nn.Module):
         
 
 
-# ## 选择优化方法
-# 
-# 这里选用Adam优化算法来更新模型参数，由于数据集较小，训练轮次少，因此，学习速率在训练过程中并不调整。但是对编码器和解码器采用了不同的学习速率。具体来说，预训练的图像编码器的学习速率小于需要从头开始训练的文本解码器的学习速率。
-
-# In[16]:
-
-
 def get_optimizer(model, config):
     return torch.optim.Adam([{"params": filter(lambda p: p.requires_grad, model.encoder.parameters()), 
                               "lr": config.encoder_learning_rate},
@@ -634,12 +479,6 @@ def adjust_learning_rate(optimizer, epoch, config):
     optimizer.param_groups[1]['lr'] = config.decoder_learning_rate * (0.1 ** (epoch // config.lr_update))
 
 
-# ## 评估指标
-# 
-# 这里借助nltk库实现了图像描述中最常用的评估指标BLEU值，需要注意的是，再调用计算BLEU值之前，要先将文本中人工添加的文本开始符、结束符和占位符去掉。
-# 
-
-# In[17]:
 
 
 from nltk.translate.bleu_score import corpus_bleu
@@ -678,15 +517,6 @@ def evaluate(data_loader, model, config):
     return bleu4
 
 
-# ## 训练模型
-# 
-# 训练模型过程仍然是分为读取数据、前馈计算、计算损失、更新参数、选择模型五个步骤。
-# 
-# 模型训练的具体方案为一共训练30轮，编码器和解码器的学习速率分别为0.0001和0.0005。
-# 
-# <!-- 模型训练的具体方案为一共训练30轮，初始编码器和解码器的学习速率分别为0.0001和0.0005，每10轮将学习速率变为原数值的1/10。 -->
-
-# In[19]:
 
 
 # 设置模型超参数和辅助变量
