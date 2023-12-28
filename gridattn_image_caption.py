@@ -425,6 +425,103 @@ class ARCTIC(nn.Module):
         image_code = self.encoder(images)
         return self.decoder(image_code, captions, cap_lens)
     
+    def generate(self, image_code, captions, max_len=120):
+        """
+        generate next word
+        """
+        preds, _ = self.decoder(image_code, captions)
+        log_soft = nn.LogSoftmax(dim=2)
+        # -> (k, len=1, vocab_size)
+        preds_log = log_soft(preds)
+        max_values, max_indices = torch.max(preds_log[:,-1,:], dim=-1)
+        return max_values.view(-1)
+        
+
+    def sample(model, images, beam_k=1, max_len=120, temperature=1.0):
+        vocab_size = len(model.vocab)
+        # image -> (batchsize, 3, 224, 224)
+        image_codes = model.encoder(images)
+        # -> (batchsize, 1, 512)
+        texts = []
+        sample_logprobs = []  # 用于存储对数概率
+        device = images.device
+        # 对batchsize中每个图像样本执行生成
+        for image_code in image_codes:
+            # 将图像表示复制k份
+            image_code = image_code.unsqueeze(0).repeat(beam_k, 1, 1)
+            # -> (beam_k, 1, 512)
+            # 生成一个候选句子，初始时，仅包含开始符号<start>
+            cur_sents = torch.full((beam_k, 1), model.vocab['<start>'], dtype=torch.long, device=device)
+            # -> (beam_k, 1)
+            cur_sent_embed = model.decoder.embed(cur_sents)[:, 0, :]
+            # -> (beam_k, 1, 512)
+            sent_lens = torch.LongTensor([1] * beam_k).to(device)
+            # 存储已生成完整的句子（以句子结束符<end>结尾的句子）
+            end_sents = []
+            # 存储已生成完整的句子的概率
+            end_probs = []
+            # 存储未完整生成的句子的概率
+            probs = torch.zeros(beam_k, 1, device=device)
+            # 存储每个词生成的概率
+            word_probs = []
+
+            k = beam_k
+            while True:
+                preds, _ = model.decoder(image_code[:k], cur_sents)
+                log_soft = F.log_softmax(preds, dim=2)
+                # -> (k, len=1, vocab_size)
+                probs = torch.exp(log_soft[:, -1, :])
+                
+                # 对每个候选句子进行采样
+                if temperature != 1.0:
+                    probs = probs / temperature
+
+                it = torch.multinomial(probs, 1)
+                sampleLogprobs = log_soft.gather(2, it.unsqueeze(2))
+                it = it.view(-1).long()
+                # 更新候选句子
+                cur_sents = torch.cat([cur_sents, it.unsqueeze(1)], dim=1)
+                # 记录每个词生成的概率
+                word_probs.append(probs.gather(1, it.unsqueeze(1)))
+
+                # 查找包含结束符<end>的句子
+                end_indices = it == model.vocab['<end>']
+                if end_indices.any():
+                    end_probs.extend(sampleLogprobs[end_indices])
+                    end_sents.extend(cur_sents[end_indices].tolist())
+                    # 如果所有的句子都包含结束符，则停止生成
+                    k -= end_indices.sum().item()
+                    if k == 0:
+                        break
+                # 查找还需要继续生成词的句子
+                cur_indices = ~end_indices
+                if cur_indices.any():
+                    cur_sents = cur_sents[cur_indices]
+                    probs = sampleLogprobs[cur_indices].view(-1, 1)
+
+                # 句子太长，停止生成
+                if cur_sents.size(1) >= max_len:
+                    break
+
+            if len(end_sents) == 0:
+                # 如果没有包含结束符的句子，则选取第一个句子作为生成句子
+                gen_result = cur_sents[0, 1:]  # 去掉第一个元素
+            else:
+                # 否则选取包含结束符的句子中概率最大的句子
+                gen_result = end_sents[end_probs.index(max(end_probs))][1:]
+
+            texts.append(gen_result)
+            # 将 word_probs 转换为形状与生成句子一致的张量
+            word_probs_tensor = torch.cat(word_probs, dim=1)
+
+            sample_logprobs.append(word_probs_tensor)
+        
+        # 将结果转换为张量
+        texts_tensor = torch.stack(texts).detach().clone()
+        return texts_tensor, sample_logprobs
+
+
+
 
     def generate_by_beamsearch(self, images, beam_k=5, max_len=120):
         vocab_size = len(self.vocab)
@@ -636,7 +733,7 @@ def main():
     config = Namespace(
         max_len = 120,
         captions_per_image = 1,
-        batch_size = 16,
+        batch_size = 1,
         image_code_dim = 2048,
         word_dim = 512,
         hidden_size = 512,
@@ -648,7 +745,7 @@ def main():
         grad_clip = 5.0,
         alpha_weight = 1.0,
         evaluate_step = 2000, # 900, # 每隔多少步在验证集上测试一次
-        checkpoint = "./model_1/last_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
+        checkpoint = "./model_1/best_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
         best_checkpoint = './model_1/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
         last_checkpoint = './model_1/last_flickr8k.ckpt', # 训练完成时的模型的路径
         beam_k = 5

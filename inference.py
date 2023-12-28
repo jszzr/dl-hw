@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision import transforms
 import json
-# from gridattn_image_caption import *
-# from Vit_GRU import *
+from gridattn_image_caption import *
+from Vit_GRU import *
 
 # image_path = './data/flickr8k/images/MEN-Denim-id_00000080-01_7_additional.jpg'  # 替换成你的图像文件路径
 # original_image = Image.open(image_path)

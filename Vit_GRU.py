@@ -102,8 +102,9 @@ def create_dataset(train_json_file = "./data/flickr8k/train_captions.json", test
   
 
 
-
-# create_dataset()
+if __name__ == '__main__':
+    pass
+    # create_dataset()
 
 # 读取词典和验证集
 with open('./data/flickr8k/vocab.json', 'r') as f:
@@ -116,12 +117,13 @@ with open('./data/flickr8k/train_captions.json', 'r') as f:
 with open('./data/flickr8k/test_captions.json', 'r') as f:
     test_data = json.load(f)
 
-print("词典长度：", len(vocab))
-print("词典：", vocab)
-print("训练集json：", len(train_data))
-print("测试集json：", len(test_data))
-print("训练集json+测试集json：", len(train_data)+len(test_data))
-print("images数量：", len(os.listdir('./data/flickr8k/images')))
+if __name__ == '__main__':
+    print("词典长度：", len(vocab))
+    print("词典：", vocab)
+    print("训练集json：", len(train_data))
+    print("测试集json：", len(test_data))
+    print("训练集json+测试集json：", len(train_data)+len(test_data))
+    print("images数量：", len(os.listdir('./data/flickr8k/images')))
 
 
 
@@ -206,9 +208,9 @@ def mktrainval(data_dir, vocab_path, batch_size, workers=0):
 
 
 from torchvision.models import vit_b_16
-class ImageEncoder(nn.Module):
+class ImageEncoder2(nn.Module):
     def __init__(self, finetuned=True):
-        super(ImageEncoder, self).__init__()
+        super(ImageEncoder2, self).__init__()
         model = torchvision.models.vit_b_16(weights=torchvision.models.ViT_B_16_Weights.DEFAULT)
         self.grid_rep_extractor = nn.Sequential(*(list(model.children())[:-2]))
         self.conv_layer = nn.Conv2d(in_channels=768, out_channels=2048, kernel_size=2, stride=2)
@@ -358,11 +360,11 @@ class AttentionDecoder(nn.Module):
         return predictions, alphas, captions, lengths, sorted_cap_indices
 
 
-class ARCTIC(nn.Module):
+class ARCTIC2(nn.Module):
     def __init__(self, image_code_dim, vocab, word_dim, attention_dim, hidden_size, num_layers):
-        super(ARCTIC, self).__init__()
+        super(ARCTIC2, self).__init__()
         self.vocab = vocab
-        self.encoder = ImageEncoder()
+        self.encoder = ImageEncoder2()
         self.decoder = AttentionDecoder(image_code_dim, len(vocab), word_dim, attention_dim, hidden_size, num_layers)
 
     def forward(self, images, captions, cap_lens):
@@ -520,30 +522,29 @@ def evaluate(data_loader, model, config):
 
 
 # 设置模型超参数和辅助变量
-if __name__ == '__main__':
+def main():
     config = Namespace(
-        max_len = 60,
+        max_len = 120,
         captions_per_image = 1,
         batch_size = 8,
         image_code_dim = 2048,
         word_dim = 512,
         hidden_size = 512,
         attention_dim = 512,
-        num_layers = 1,
+        num_layers = 3,
         encoder_learning_rate = 0.00001,
         decoder_learning_rate = 0.00005,
-        num_epochs = 10,
+        num_epochs = 30,
         grad_clip = 5.0,
         alpha_weight = 1.0,
         evaluate_step = 900, # 每隔多少步在验证集上测试一次
-        checkpoint = None, # 如果不为None，则利用该变量路径的模型继续训练
+        checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 如果不为None，则利用该变量路径的模型继续训练
         best_checkpoint = './model/ARCTIC/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
         last_checkpoint = './model/ARCTIC/last_flickr8k.ckpt', # 训练完成时的模型的路径
         beam_k = 5
     )
 
     # 设置GPU信息
-    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 
     # 数据
@@ -559,12 +560,13 @@ if __name__ == '__main__':
     start_epoch = 0
     checkpoint = config.checkpoint
     if checkpoint is None:
-        model = ARCTIC(config.image_code_dim, vocab, config.word_dim, config.attention_dim, config.hidden_size, config.num_layers)
+        model = ARCTIC2(config.image_code_dim, vocab, config.word_dim, config.attention_dim, config.hidden_size, config.num_layers)
     else:
         checkpoint = torch.load(checkpoint)
         start_epoch = checkpoint['epoch'] + 1
         model = checkpoint['model']
 
+    last_epoch = start_epoch
     # 优化器
     optimizer = get_optimizer(model, config)
 
@@ -615,7 +617,8 @@ if __name__ == '__main__':
                     'model': model,
                     'optimizer': optimizer
                     }
-            if (i+1) % config.evaluate_step == 0:
+            if epoch - last_epoch >= 1: # (i+1) % config.evaluate_step == 0:
+                last_epoch = epoch
                 bleu_score = evaluate(test_loader, model, config)
                 # 5. 选择模型
                 if best_res < bleu_score:
@@ -637,6 +640,9 @@ if __name__ == '__main__':
         (checkpoint['epoch'], bleu_score))
     fw.close()      
 
+if __name__ == '__main__':
+    main()
+    pass
 
 # 这段代码完成训练，最后一行会输出在验证集上表现最好的模型在测试集上的结果，具体如下：
 # 

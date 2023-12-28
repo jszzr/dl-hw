@@ -1,57 +1,95 @@
 import torch
+import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
+import torch.nn.functional as F
+from torch.autograd import Variable
+import numpy as np
+import nltk
 from nltk.translate.bleu_score import sentence_bleu
 from gridattn_image_caption import *
+from Vit_GRU import *
+from misc import *
 
-class RLBasedTrainer:
-    def __init__(self, model, optimizer, bleu_score_fn):
-        self.model = model
-        self.optimizer = optimizer
-        self.bleu_score_fn = bleu_score_fn
 
-    def train(self, images, captions):
-        self.model.train()
-        self.optimizer.zero_grad()
+rl_crit = RewardCriterion()
 
-        # Generate sentences using the current model parameters
-        sampled_captions, log_probs = self.model.sample(images)
-        greedy_captions = self.model.greedy_search(images)
 
-        # Compute rewards
-        sampled_rewards = self.compute_rewards(sampled_captions, captions)
-        greedy_rewards = self.compute_rewards(greedy_captions, captions)
+def main():
+    # 设置模型超参数和辅助变量
+    # freeze_support()
+    config = Namespace(
+        max_len = 120,
+        captions_per_image = 1,
+        batch_size = 16,
+        image_code_dim = 2048,
+        word_dim = 512,
+        hidden_size = 512,
+        attention_dim = 512,
+        num_layers = 3,
+        encoder_learning_rate = 0.00001,
+        decoder_learning_rate = 0.00005,
+        num_epochs = 30,
+        grad_clip = 5.0,
+        alpha_weight = 1.0,
+        evaluate_step = 2000, # 900, # 每隔多少步在验证集上测试一次
+        checkpoint = "./model_1/best_flickr8k.ckpt", # 如果不为None，则利用该变量路径的模型继续训练
+        best_checkpoint = './model_1/best_flickr8k.ckpt', # 验证集上表现最优的模型的路径
+        last_checkpoint = './model_1/last_flickr8k.ckpt', # 训练完成时的模型的路径
+        beam_k = 5
+    )
 
-        # Compute advantages
-        advantages = sampled_rewards - greedy_rewards
 
-        # Compute loss
-        loss = -log_probs * advantages
-        loss = loss.sum()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Backpropagation
-        loss.backward()
-        self.optimizer.step()
+    data_dir = './data/flickr8k/'
+    vocab_path = './data/flickr8k/vocab.json'
+    train_loader, test_loader = mktrainval(data_dir, vocab_path, config.batch_size)
 
-        return loss.item()
+    # 模型
+    with open(vocab_path, 'r') as f:
+        vocab = json.load(f)
 
-    def compute_rewards(self, generated_captions, target_captions):
-        rewards = []
-        for gen_cap, tar_cap in zip(generated_captions, target_captions):
-            reward = self.bleu_score_fn(gen_cap, tar_cap)
-            rewards.append(reward)
-        return torch.tensor(rewards, dtype=torch.float)
+    # 随机初始化 或 载入已训练的模型
+    start_epoch = 0
+    checkpoint = config.checkpoint
+    if checkpoint is None:
+        model = ARCTIC(config.image_code_dim, vocab, config.word_dim, config.attention_dim, config.hidden_size, config.num_layers)
+    else:
+        checkpoint = torch.load(checkpoint)
+        start_epoch = checkpoint['epoch'] + 1
+        model = checkpoint['model']
 
-# Initialize the model and the optimizer
-model = ARCTIC()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-data_dir = './data/flickr8k/'
-vocab_path = './data/flickr8k/vocab.json'
-train_loader, test_loader = mktrainval(data_dir, vocab_path, 8)
+    last_epoch = start_epoch
+    optimizer = get_optimizer(model, config)
+    model.to(device)
 
-# Initialize the trainer
-trainer = RLBasedTrainer(model, optimizer, sentence_bleu)
-# Train the model
-for images, captions in train_loader:
-    loss = trainer.train(images, captions)
-    print('Loss:', loss)
+    # 环境
+
+
+    for epoch in range(start_epoch, config.num_epochs):
+        for i, (imgs, caps, caplens) in enumerate(train_loader):
+            imgs = imgs.to(device)
+            caps = caps.to(device)
+            caplens = caplens.to(device)
+
+            
+            gen_result, sample_logprobs = model.sample(imgs)
+            # gen_result = [sublist[1:] for sublist in gen_result]
+            # gen_result = nn.utils.rnn.pad_sequence([torch.tensor(sublist) for sublist in gen_result], batch_first=True, padding_value=-1).to(device)
+            # sample_logprobs = nn.utils.rnn.pad_sequence([torch.tensor(sublist) for sublist in sample_logprobs], batch_first=True, padding_value=0).to(device)
+
+            reward = get_self_critical_reward(model, imgs, gen_result, caps, config.batch_size)
+            loss = rl_crit(sample_logprobs, gen_result, torch.from_numpy(reward).float().cuda())
+            
+            loss.backward()
+
+            if config.grad_clip > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            
+            optimizer.step()
+
+
+
+
+if __name__ == '__main__':
+    main()
